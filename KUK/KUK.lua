@@ -865,9 +865,13 @@ end
 ---------------------------------------------------------------------------
 -- The game greys out an item in the bags once it's attached to a letter. Items in
 -- the extra slots (and ones still waiting to go out in a follow-up letter) get the
--- same grey look in Blizzard's own bag windows.
+-- same grey look: in Blizzard's bag windows, and in bag add-ons such as Baganator
+-- that draw their buttons with the game's own SetItemButtonDesaturated.
 
 local marked = {} -- bag * 1000 + slot of every bag item greyed out by this addon
+-- Bag buttons seen being drawn, by bag * 1000 + slot. Bag add-ons reuse buttons
+-- for other slots, so every entry is checked again before it's used.
+local seen = setmetatable({}, { __mode = "v" })
 
 local function QueuedKeys()
 	local keys = {}
@@ -881,10 +885,29 @@ local function QueuedKeys()
 	return keys
 end
 
-local function BagButton(bag, slot)
-	if not ContainerFrameUtil_GetItemButtonAndContainer then return end
-	local ok, button = pcall(ContainerFrameUtil_GetItemButtonAndContainer, bag, slot)
-	return ok and button or nil
+-- The bag and slot a bag button shows, or nil if it isn't a button for your bags.
+local function ButtonSlot(button)
+	if type(button) ~= "table" or type(button.GetBagID) ~= "function" or type(button.GetID) ~= "function" then return end
+	local ok, bag = pcall(button.GetBagID, button)
+	if not ok or type(bag) ~= "number" or bag < 0 or bag > LastBag() then return end
+	local slot = button:GetID()
+	if type(slot) ~= "number" or slot < 1 then return end
+	return bag, slot
+end
+
+-- Every button currently showing this bag slot: Blizzard's and any bag add-on's.
+local function BagButtons(bag, slot)
+	local list = {}
+	if ContainerFrameUtil_GetItemButtonAndContainer then
+		local ok, button = pcall(ContainerFrameUtil_GetItemButtonAndContainer, bag, slot)
+		if ok and button then list[#list + 1] = button end
+	end
+	local other = seen[bag * 1000 + slot]
+	if other and other ~= list[1] and other:IsVisible() then
+		local b, s = ButtonSlot(other)
+		if b == bag and s == slot then list[#list + 1] = other end
+	end
+	return list
 end
 
 local function RefreshBagHighlights()
@@ -893,27 +916,28 @@ local function RefreshBagHighlights()
 		if not now[key] then
 			marked[key] = nil
 			local bag, slot = math.floor(key / 1000), key % 1000
-			local button = BagButton(bag, slot)
-			if button then
-				local info = C_Container.GetContainerItemInfo(bag, slot)
+			local info = C_Container.GetContainerItemInfo(bag, slot)
+			for _, button in ipairs(BagButtons(bag, slot)) do
 				SetItemButtonDesaturated(button, info and info.isLocked or false)
 			end
 		end
 	end
 	for key in pairs(now) do
 		marked[key] = true
-		local button = BagButton(math.floor(key / 1000), key % 1000)
-		if button then SetItemButtonDesaturated(button, true) end
+		for _, button in ipairs(BagButtons(math.floor(key / 1000), key % 1000)) do
+			SetItemButtonDesaturated(button, true)
+		end
 	end
 end
 
--- The bags redraw their buttons often and clear the grey look each time; put it back.
+-- Bag windows redraw their buttons often and clear the grey look each time; put it
+-- back. This is also how buttons from bag add-ons get noticed.
 hooksecurefunc("SetItemButtonDesaturated", function(button, desaturated)
-	if desaturated or not button or not next(marked) or type(button.GetBagID) ~= "function" then return end
-	local ok, bag = pcall(button.GetBagID, button)
-	if ok and type(bag) == "number" and bag >= 0 and marked[bag * 1000 + button:GetID()] then
-		SetItemButtonDesaturated(button, true)
-	end
+	local bag, slot = ButtonSlot(button)
+	if not bag then return end
+	local key = bag * 1000 + slot
+	seen[key] = button
+	if not desaturated and marked[key] then SetItemButtonDesaturated(button, true) end
 end)
 
 function UpdatePanel()
