@@ -29,6 +29,8 @@ local general = CreateFrame("Frame", "KUKOptions")
 general:Hide()
 local quick = CreateFrame("Frame", "KUKQuickAttachOptions")
 quick:Hide()
+local toPage = CreateFrame("Frame", "KUKToFieldOptions")
+toPage:Hide()
 local widgets = {}
 local Refresh
 
@@ -130,7 +132,7 @@ end
 local function BuildGeneral()
 	local f = general
 	local title = Title(f, PO.TITLE)
-	local sub = Note(f, "More attachment slots, grouped inbox letters and a To field that finds your own characters first.", title, -6)
+	local sub = Note(f, "Everything for the mailbox in one add-on: more attachment slots, QuickAttach buttons, an address book, inbox tools and grouped letters.", title, -6)
 
 	-- Send Mail
 	local send = Heading(f, "Send Mail", sub, -18)
@@ -181,10 +183,24 @@ local function BuildGeneral()
 		PO.SetGroupingOff(not on)
 	end)
 	widgets.grouping:SetPoint("TOPLEFT", inbox, "BOTTOMLEFT", 0, -10)
+	widgets.inboxTools = CheckBox(f, "Tick boxes, return/delete icons and ctrl-click to return", function(on)
+		PO.SetInboxToolsOff(not on)
+	end)
+	widgets.inboxTools:SetPoint("TOPLEFT", widgets.grouping, "BOTTOMLEFT", 0, -2)
+end
 
-	-- To field
-	local to = Heading(f, "To field: fill in names from, in this order", widgets.grouping, -14)
-	local toNote = Note(f, "Takes the first match while you type. Unticked sources are skipped. Postal's own \"Use AutoComplete\" switch in its BlackBook menu still turns this off completely.", to, -12)
+---------------------------------------------------------------------------
+-- To field page
+---------------------------------------------------------------------------
+
+local function BuildTo()
+	local f = toPage
+	local title = Title(f, "To field")
+	local intro = Note(f, "While you type a name in the To field, it is filled in from your alts, friends, guild, recently mailed and contacts. Always the plain character name, without a realm.", title, -8)
+	local to = Heading(f, "Fill in names from, in this order", intro, -16)
+	widgets.toFill = CheckBox(f, "Fill in names while typing", function(on) DB().toFillOff = not on or nil end)
+	widgets.toFill:SetPoint("TOPLEFT", to, "BOTTOMLEFT", 0, -10)
+	local toNote = Note(f, "Takes the first match while you type; unticked sources are skipped. The arrow button beside the To field lists the same names.", widgets.toFill, -4)
 	widgets.rows = {}
 	local prev = toNote
 	for i = 1, 5 do
@@ -237,7 +253,7 @@ end
 local function BuildQuick()
 	local f = quick
 	local title = Title(f, "QuickAttach buttons")
-	local note = Note(f, "Choose which of Postal's QuickAttach buttons (Cloth, Leather and so on) are shown down the right side of the Send Mail window. The shown ones close up so there are no gaps, and the gear button under them opens these options. Which bags the buttons take items from is set in Postal's own menu, under QuickAttach.", title, -8)
+	local note = Note(f, "Choose which QuickAttach buttons (Cloth, Leather and so on) are shown down the right side of the Send Mail window. Left-click a button to attach every matching item from your bags; right-click it to give it a default recipient. The gear button under them opens these settings.", title, -8)
 
 	-- Profiles
 	local profiles = Heading(f, "Profile", note, -16)
@@ -324,8 +340,8 @@ local function RefreshQuick()
 	local list, enabled = PO.GetQuickAttachButtons()
 	if #list == 0 or not enabled then
 		widgets.qaEmpty:SetText(not enabled
-			and "Postal's QuickAttach module is turned off, so there are no buttons. Turn it on in Postal's menu."
-			or "Postal hasn't made its QuickAttach buttons yet. Open the Send Mail tab at a mailbox once, then come back here.")
+			and "The QuickAttach buttons are switched off."
+			or "There are no QuickAttach buttons.")
 		widgets.qaEmpty:Show()
 	else
 		widgets.qaEmpty:Hide()
@@ -368,11 +384,8 @@ end
 ---------------------------------------------------------------------------
 
 function Refresh()
-	if widgets.maxBox and general:IsVisible() then
-		if not widgets.maxBox:HasFocus() then widgets.maxBox:SetNumber(PO.GetMaxItems()) end
-		widgets.grouping:SetChecked(not DB().groupingOff)
-		widgets.autoSubject:SetChecked(not DB().autoSubjectOff)
-		widgets.minimap:SetChecked(PO.Minimap and PO.Minimap:IsShown() or false)
+	if widgets.toFill and toPage:IsVisible() then
+		widgets.toFill:SetChecked(not DB().toFillOff)
 		local order = PO.GetToOrder()
 		for i, row in ipairs(widgets.rows) do
 			local key = order[i]
@@ -385,12 +398,21 @@ function Refresh()
 			row.down:SetEnabled(i < #order)
 		end
 	end
+	if widgets.maxBox and general:IsVisible() then
+		if not widgets.maxBox:HasFocus() then widgets.maxBox:SetNumber(PO.GetMaxItems()) end
+		widgets.grouping:SetChecked(not DB().groupingOff)
+		widgets.autoSubject:SetChecked(not DB().autoSubjectOff)
+		widgets.inboxTools:SetChecked(not DB().inboxToolsOff)
+		widgets.minimap:SetChecked(PO.Minimap and PO.Minimap:IsShown() or false)
+	end
 	if widgets.showQA and quick:IsVisible() then RefreshQuick() end
 end
 
 general:SetScript("OnShow", Refresh)
 quick:SetScript("OnShow", Refresh)
+toPage:SetScript("OnShow", Refresh)
 BuildGeneral()
+BuildTo()
 BuildQuick()
 
 ---------------------------------------------------------------------------
@@ -400,7 +422,7 @@ BuildQuick()
 local window, tabs
 
 local function ShowPage(page)
-	for _, f in ipairs({ general, quick }) do
+	for _, f in ipairs({ general, toPage, quick }) do
 		f:SetParent(window)
 		f:ClearAllPoints()
 		f:SetPoint("TOPLEFT", window, "TOPLEFT", 6, -58)
@@ -422,7 +444,7 @@ local function CreateWindow()
 		local close = CreateFrame("Button", nil, window, "UIPanelCloseButton")
 		close:SetPoint("TOPRIGHT", 2, 2)
 	end
-	window:SetSize(600, 740)
+	window:SetSize(600, 640)
 	window:SetPoint("CENTER")
 	window:SetFrameStrata("DIALOG")
 	window:SetToplevel(true)
@@ -436,7 +458,7 @@ local function CreateWindow()
 	title:SetPoint("TOP", 0, -5)
 	title:SetText(PO.TITLE)
 	tabs = {}
-	for i, info in ipairs({ { "General", general }, { "QuickAttach buttons", quick } }) do
+	for i, info in ipairs({ { "General", general }, { "To field", toPage }, { "QuickAttach buttons", quick } }) do
 		local tab = CreateFrame("Button", nil, window, "UIPanelButtonTemplate")
 		tab:SetSize(150, 22)
 		tab:SetPoint("TOPLEFT", 12 + (i - 1) * 156, -30)
@@ -447,6 +469,7 @@ local function CreateWindow()
 	end
 	window:SetScript("OnHide", function()
 		general:Hide()
+		toPage:Hide()
 		quick:Hide()
 	end)
 	tinsert(UISpecialFrames, "KUKOptionsWindow") -- Esc closes it
@@ -482,12 +505,15 @@ events:SetScript("OnEvent", function()
 	if Settings and Settings.RegisterCanvasLayoutCategory then
 		local category = Settings.RegisterCanvasLayoutCategory(general, name)
 		if Settings.RegisterCanvasLayoutSubcategory then
+			Settings.RegisterCanvasLayoutSubcategory(category, toPage, "To field")
 			Settings.RegisterCanvasLayoutSubcategory(category, quick, "QuickAttach buttons")
 		end
 		Settings.RegisterAddOnCategory(category)
 	elseif InterfaceOptions_AddCategory then
 		general.name = name
 		InterfaceOptions_AddCategory(general)
+		toPage.name, toPage.parent = "To field", name
+		InterfaceOptions_AddCategory(toPage)
 		quick.name, quick.parent = "QuickAttach buttons", name
 		InterfaceOptions_AddCategory(quick)
 	end

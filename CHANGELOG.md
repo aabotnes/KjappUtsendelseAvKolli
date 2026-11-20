@@ -1,5 +1,15 @@
 # Kjapp Utsendelse av Kolli
 
+## v3.0.0
+
+- **One add-on, no Postal needed.** K.U.K. now has everything itself:
+  - **QuickAttach buttons** (Cloth, Leather, Metal & Stone, Herb, Cooking, Elemental, Enchanting, Parts and more). Left-click attaches every match, into the extra slots too; right-click sets a default recipient.
+  - **Address book** behind the arrow beside the To field: alts with level and class, recently mailed, contacts, friends and guild. Your characters are remembered as you log in on them.
+  - **Inbox tick boxes** with *Take ticked* and *Return ticked*, **return/delete icons** on every row, **ctrl-click to return**, and the **mouse wheel** turns inbox pages.
+  - **Forward** and **Copy text** on an open letter, and a **gold summary** when you close the mailbox.
+- Postal's alts, recently mailed and contacts are copied over once, if Postal is still installed. If both are installed, Postal's QuickAttach buttons and To field completion step aside.
+- The settings have a third tab, **To field**, with a switch to turn filling in names off.
+
 ## v2.1.0
 
 - **New name and look:** [Soeta's] Kjapp Utsendelse av Kolli, with the [Soeta's] title, font and colors in the settings window, a minimap button and an add-on compartment entry. The command is `/kuk`.

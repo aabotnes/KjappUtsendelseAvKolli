@@ -1,8 +1,8 @@
 ## Interface: 16001
 ## Title: |cffc27dff[Soeta's]|r Kjapp Utsendelse av Kolli
-## Notes: |cffc27dff[Soeta's]|r More mail slots (36 by default, sent as letters of 12), a resizable Send Mail window, an auto subject, a To field that finds your alts first, QuickAttach profiles per character, and matching letters shown as one inbox row. /kuk
+## Notes: |cffc27dff[Soeta's]|r Everything for the mailbox: 36 attachment slots (sent as letters of 12), QuickAttach buttons with profiles, an address book with a To field that finds your alts first, inbox tick boxes, return/delete icons, grouped letters, forward and a gold summary. /kuk
 ## Author: Soeta
-## Version: v2.1.0
+## Version: v3.0.0
 ## Category: Mail
 ## OptionalDeps: Postal
 ## SavedVariables: KUKDB
@@ -11,6 +11,9 @@
 
 KUK.lua
 Inbox.lua
+InboxTools.lua
+AddressBook.lua
 AutoComplete.lua
+QuickAttach.lua
 Options.lua
 Minimap.lua

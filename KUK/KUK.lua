@@ -310,8 +310,7 @@ local function SendNext()
 	SendCurrent()
 end
 
--- Every letter goes through SendMail, whether from Blizzard's Send button,
--- Postal's Express alt-click, or this addon.
+-- Every letter goes through SendMail, whether from the Send button or this addon.
 hooksecurefunc("SendMail", function(recipient, subject, body)
 	if sending then return end
 	if run then
@@ -369,8 +368,8 @@ hooksecurefunc(C_Container, "UseContainerItem", function(bag, slot)
 	end
 end)
 
--- Dropping an item on a full mail, Postal's Express alt-click, and anything
--- else that attaches through ClickSendMailItemButton.
+-- Dropping an item on a full mail, and anything else that attaches through
+-- ClickSendMailItemButton.
 if ClickSendMailItemButton then
 	hooksecurefunc("ClickSendMailItemButton", function()
 		if attaching or run or not SendTabOpen() or AttachedCount() < MAX then return end
@@ -378,42 +377,45 @@ if ClickSendMailItemButton then
 	end)
 end
 
--- Postal's QuickAttach buttons stop at 12; put the rest of the matching items in extra slots.
-local function HookQuickAttach()
-	if type(Postal_QuickAttachLeftButtonClick) ~= "function" then return false end
-	hooksecurefunc("Postal_QuickAttachLeftButtonClick", function(classID, subclassID)
-		if run or AttachedCount() < MAX then return end
-		local postal = LibStub and LibStub("AceAddon-3.0", true)
-		postal = postal and postal:GetAddon("Postal", true)
-		local bagsDB = postal and postal.db and postal.db.profile.QuickAttach
-		local added, full, lastPos = 0, false, nil
-		for bag = 0, LastBag() do
-			if not bagsDB or bagsDB["EnableBag" .. bag] then
-				for slot = 1, (C_Container.GetContainerNumSlots(bag) or 0) do
-					local info = C_Container.GetContainerItemInfo(bag, slot)
-					if info and info.itemID and not info.isLocked and not FindQueued(bag, slot) then
-						local _, _, _, _, _, _, _, _, _, _, _, cls, sub, bind = C_Item.GetItemInfo(info.itemID)
-						if cls == classID and (sub == subclassID or subclassID == -1) and bind ~= LE_ITEM_BIND_ON_ACQUIRE then
-							if not FirstFreeExtra() then
-								full = true
-								break
-							end
-							local pos = AddToQueue(bag, slot, true)
-							if pos then
-								added, lastPos = added + 1, pos
-							end
-						end
-					end
+-- Put bag items in the letter: the free real slots first, then the extra slots.
+-- Used by the QuickAttach buttons. list = { { bag = b, slot = s }, ... }
+function PO.AttachItems(list)
+	if run or not SendTabOpen() then return 0, 0 end
+	local free = {}
+	for i = 1, MAX do
+		if not HasSendMailItem(i) then free[#free + 1] = i end
+	end
+	local attached, queued, lastPos, full = 0, 0, nil, false
+	attaching = true
+	for _, it in ipairs(list) do
+		local info = C_Container.GetContainerItemInfo(it.bag, it.slot)
+		if info and not info.isLocked and not info.isBound and not FindQueued(it.bag, it.slot) then
+			if #free > 0 and not GetCursorInfo() then
+				local index = table.remove(free, 1)
+				C_Container.PickupContainerItem(it.bag, it.slot)
+				if GetCursorInfo() == "item" then
+					ClickSendMailItemButton(index)
+					if GetCursorInfo() then ClearCursor() else attached = attached + 1 end
 				end
+			else
+				local pos = AddToQueue(it.bag, it.slot, true)
+				if not pos then
+					full = true
+					break
+				end
+				queued, lastPos = queued + 1, pos
 			end
-			if full then break end
 		end
-		if full then FullMessage() end
-		if lastPos then RevealPosition(MAX + lastPos) end
-		if added > 0 then UpdatePanel() end
-	end)
-	return true
+	end
+	attaching = false
+	if full then FullMessage() end
+	if lastPos then RevealPosition(MAX + lastPos) end
+	UpdatePanel()
+	return attached, queued
 end
+
+PO.SendTabOpen = function() return SendTabOpen() end
+PO.LastBag = LastBag
 
 ---------------------------------------------------------------------------
 -- Subject
@@ -831,7 +833,7 @@ function PO.GetMaxItems() return MaxItems() end
 PO.MIN_ITEMS, PO.MAX_ITEMS, PO.DEFAULT_ITEMS = MAX, MAX_ITEMS, DEFAULT_ITEMS
 
 ---------------------------------------------------------------------------
--- Window tweaks: no "Postage:" label, and a show/hide switch for QuickAttach
+-- Window tweaks: no "Postage:" label
 ---------------------------------------------------------------------------
 
 -- Hide the "Postage:" label next to the cost. Only that exact text is touched.
@@ -856,274 +858,6 @@ local function HidePostageLabel()
 		end
 	end
 	if SendMailFrame then scan(SendMailFrame, 3) end
-end
-
-local qaToggle
-
-local function QuickAttachButtons()
-	local list, i = {}, 1
-	while _G["Postal_QuickAttachButton" .. i] do
-		list[#list + 1] = _G["Postal_QuickAttachButton" .. i]
-		i = i + 1
-	end
-	return list
-end
-
-local function QuickAttachEnabled()
-	local m = Postal and Postal.GetModule and Postal:GetModule("QuickAttach", true)
-	return m and m:IsEnabled() or false
-end
-
--- QuickAttach settings (which buttons show) live in named profiles. Each character
--- picks one; characters that never picked one use "Default".
-local function CharKey()
-	return (UnitName("player") or "?") .. " - " .. (GetRealmName() or "?")
-end
-
-local function QAProfiles()
-	local db = DB()
-	if type(db.qaProfiles) ~= "table" then
-		-- Earlier versions had one set of QuickAttach settings for everyone; that becomes "Default".
-		db.qaProfiles = { Default = {
-			hideAll = db.hideQuickAttach or nil,
-			hidden = type(db.qaHidden) == "table" and db.qaHidden or nil,
-		} }
-		db.hideQuickAttach, db.qaHidden = nil, nil
-	end
-	if type(db.qaProfiles.Default) ~= "table" then db.qaProfiles.Default = {} end
-	if type(db.qaProfileByChar) ~= "table" then db.qaProfileByChar = {} end
-	return db.qaProfiles
-end
-
-function PO.GetQAProfileName()
-	local profiles = QAProfiles()
-	local name = DB().qaProfileByChar[CharKey()]
-	if not name or type(profiles[name]) ~= "table" then name = "Default" end
-	return name
-end
-
-local function QAProfile()
-	return QAProfiles()[PO.GetQAProfileName()]
-end
-
--- Buttons are remembered by their icon, which stays the same if Postal reorders them.
-local function QAKey(b)
-	local texture = b.icon and b.icon:GetTexture()
-	return tostring(texture or b:GetName())
-end
-
--- The button's name, read from the first line of its tooltip.
-local function QALabel(b)
-	local onEnter = b:GetScript("OnEnter")
-	local label
-	if onEnter and GameTooltipTextLeft1 then
-		pcall(onEnter, b)
-		label = GameTooltipTextLeft1:GetText()
-		GameTooltip:Hide()
-	end
-	label = label and label:match("^[^\n]+")
-	return label or (b:GetName():gsub("^Postal_QuickAttach", ""))
-end
-
-local function ButtonLabel(b)
-	if not b.kukLabel then b.kukLabel = QALabel(b) end
-	return b.kukLabel
-end
-
--- Trade goods from later expansions that WoW Forever doesn't have. Their buttons
--- are hidden unless a profile ticks them on again.
-local NOT_IN_FOREVER = { "Jewelcrafting", "Inscription", "Optional Reagents" }
-local notInForever
-
-local function IsNotInForever(b)
-	if not notInForever then
-		notInForever = {}
-		local ace = LibStub and LibStub("AceLocale-3.0", true)
-		local L = ace and ace:GetLocale("Postal", true)
-		for _, name in ipairs(NOT_IN_FOREVER) do
-			notInForever[name] = true
-			local localized = L and rawget(L, name)
-			if type(localized) == "string" then notInForever[localized] = true end
-		end
-	end
-	return notInForever[ButtonLabel(b)] or false
-end
-
--- A profile's hidden[key] is true (hidden), false (shown) or unset (the default).
-local function QAButtonHidden(b)
-	local hidden = QAProfile().hidden
-	local choice = type(hidden) == "table" and hidden[QAKey(b)]
-	if choice == nil then return IsNotInForever(b) end
-	return choice
-end
-
-local function QAButtonWanted(b)
-	return not QAProfile().hideAll and QuickAttachEnabled() and not QAButtonHidden(b)
-end
-
-local settingsButton
-
-local function SettingsButtonOnEnter(self)
-	GameTooltip:SetOwner(self, "ANCHOR_BOTTOMRIGHT")
-	GameTooltip:SetText(KUK.TITLE, 1, 1, 1)
-	GameTooltip:AddLine("Settings", 1, 1, 1)
-	GameTooltip:AddLine("Slot limit, which QuickAttach buttons to show, To field order and more. Same as /kuk.", nil, nil, nil, true)
-	GameTooltip:Show()
-end
-
-local function CreateSettingsButton()
-	-- Built like Postal's QuickAttach buttons so it lines up under them.
-	local ok, b = pcall(CreateFrame, "Button", "KUKSettingsButton", SendMailFrame, "ActionButtonTemplate")
-	if not ok or not b then return end
-	b:SetScale(0.73)
-	if b.icon then b.icon:SetTexture("Interface\\Icons\\INV_Misc_Gear_01") end
-	b:RegisterForClicks("AnyUp")
-	b:SetScript("OnClick", function() if PO.OpenOptions then PO.OpenOptions() end end)
-	b:SetScript("OnEnter", SettingsButtonOnEnter)
-	b:SetScript("OnLeave", GameTooltip_Hide)
-	settingsButton = b
-end
-
--- Show the chosen QuickAttach buttons in one column without gaps, then the settings button.
-local function ApplyQuickAttachVisibility()
-	local buttons = QuickAttachButtons()
-	local row = 0
-	for _, b in ipairs(buttons) do
-		if not b.kukHooked then
-			-- Postal shows its buttons again on its own; keep the unwanted ones hidden.
-			b:HookScript("OnShow", function(self)
-				if not QAButtonWanted(self) then self:Hide() end
-			end)
-			b.kukHooked = true
-		end
-		if QAButtonWanted(b) then
-			b:ClearAllPoints()
-			b:SetPoint("TOPLEFT", MailFrame, "TOPRIGHT", 0, -math.floor(b:GetHeight() + 0.5) * row)
-			b:Show()
-			row = row + 1
-		else
-			b:Hide()
-		end
-	end
-	if settingsButton then
-		settingsButton:ClearAllPoints()
-		settingsButton:SetPoint("TOPLEFT", MailFrame, "TOPRIGHT", 0, -math.floor(settingsButton:GetHeight() + 0.5) * row)
-		settingsButton:Show()
-	end
-	if qaToggle then
-		qaToggle:SetShown(#buttons > 0 and QuickAttachEnabled())
-		local file = QAProfile().hideAll and "NextPage" or "PrevPage"
-		qaToggle:SetNormalTexture("Interface\\Buttons\\UI-SpellbookIcon-" .. file .. "-Up")
-		qaToggle:SetPushedTexture("Interface\\Buttons\\UI-SpellbookIcon-" .. file .. "-Down")
-	end
-end
-
-function PO.IsQuickAttachHidden()
-	return QAProfile().hideAll and true or false
-end
-
-function PO.SetQuickAttachHidden(hidden)
-	QAProfile().hideAll = hidden and true or false
-	ApplyQuickAttachVisibility()
-end
-
--- For the options: Postal's QuickAttach buttons with their icon, name and whether they're shown.
-function PO.GetQuickAttachButtons()
-	local list = {}
-	for _, b in ipairs(QuickAttachButtons()) do
-		local key = QAKey(b)
-		list[#list + 1] = {
-			key = key,
-			label = ButtonLabel(b),
-			icon = b.icon and b.icon:GetTexture(),
-			shown = not QAButtonHidden(b),
-			notInForever = IsNotInForever(b),
-		}
-	end
-	return list, QuickAttachEnabled()
-end
-
-function PO.SetQuickAttachButtonShown(key, shown)
-	if type(QAProfile().hidden) ~= "table" then QAProfile().hidden = {} end
-	QAProfile().hidden[key] = not shown
-	ApplyQuickAttachVisibility()
-end
-
--- Tick every button, including the ones for trade goods Forever doesn't have.
-function PO.ShowAllQuickAttachButtons()
-	local hidden = {}
-	for _, b in ipairs(QuickAttachButtons()) do hidden[QAKey(b)] = false end
-	QAProfile().hidden = hidden
-	ApplyQuickAttachVisibility()
-end
-
--- Back to the default: everything except the trade goods Forever doesn't have.
-function PO.DefaultQuickAttachButtons()
-	QAProfile().hidden = nil
-	QAProfile().hideAll = nil
-	ApplyQuickAttachVisibility()
-end
-
--- Profile management, for the options.
-function PO.GetQAProfiles()
-	local names = {}
-	for name, p in pairs(QAProfiles()) do
-		if type(p) == "table" then names[#names + 1] = name end
-	end
-	table.sort(names, function(a, b)
-		if a == "Default" or b == "Default" then return a == "Default" end
-		return a:lower() < b:lower()
-	end)
-	return names
-end
-
--- Characters that use a profile ("Default" also counts every character that never picked one).
-function PO.GetQAProfileUsers(name)
-	QAProfiles()
-	local users = {}
-	for char, used in pairs(DB().qaProfileByChar) do
-		if used == name then users[#users + 1] = char end
-	end
-	table.sort(users)
-	return users
-end
-
-function PO.CurrentCharacter()
-	return CharKey()
-end
-
-function PO.SetQAProfile(name)
-	if type(QAProfiles()[name]) ~= "table" then return false end
-	DB().qaProfileByChar[CharKey()] = (name ~= "Default") and name or nil
-	ApplyQuickAttachVisibility()
-	return true
-end
-
--- Make a new profile, starting as a copy of the one this character uses now, and switch to it.
-function PO.NewQAProfile(name)
-	name = strtrim(name or "")
-	if name == "" then return false, "Type a name for the new profile." end
-	if #name > 40 then return false, "That name is too long." end
-	local profiles = QAProfiles()
-	if profiles[name] then return false, ("There's already a profile called %s."):format(name) end
-	local current = QAProfile()
-	profiles[name] = {
-		hideAll = current.hideAll,
-		hidden = type(current.hidden) == "table" and CopyTable(current.hidden) or nil,
-	}
-	PO.SetQAProfile(name)
-	return true
-end
-
--- Delete a profile. Characters that used it go back to "Default".
-function PO.DeleteQAProfile(name)
-	if name == "Default" or type(QAProfiles()[name]) ~= "table" then return false end
-	QAProfiles()[name] = nil
-	for char, used in pairs(DB().qaProfileByChar) do
-		if used == name then DB().qaProfileByChar[char] = nil end
-	end
-	ApplyQuickAttachVisibility()
-	return true
 end
 
 ---------------------------------------------------------------------------
@@ -1182,32 +916,6 @@ hooksecurefunc("SetItemButtonDesaturated", function(button, desaturated)
 	end
 end)
 
-function KUK_ToggleQuickAttach()
-	PO.SetQuickAttachHidden(not QAProfile().hideAll)
-	return QAProfile().hideAll
-end
-
-local function QAToggleOnEnter(self)
-	GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-	local hidden = QAProfile().hideAll
-	GameTooltip:SetText(hidden and "Show QuickAttach buttons" or "Hide QuickAttach buttons", 1, 1, 1)
-	GameTooltip:Show()
-end
-
-local function CreateQuickAttachToggle()
-	qaToggle = CreateFrame("Button", "KUKQuickAttachToggle", SendMailFrame)
-	qaToggle:SetSize(24, 24)
-	qaToggle:SetPoint("BOTTOMLEFT", MailFrame, "TOPRIGHT", 0, 2)
-	qaToggle:SetHighlightTexture("Interface\\Buttons\\UI-Common-MouseHilight", "ADD")
-	qaToggle:SetScript("OnClick", function(self)
-		KUK_ToggleQuickAttach()
-		if GameTooltip:IsOwned(self) then QAToggleOnEnter(self) end
-	end)
-	qaToggle:SetScript("OnEnter", QAToggleOnEnter)
-	qaToggle:SetScript("OnLeave", GameTooltip_Hide)
-	qaToggle:Hide()
-end
-
 function UpdatePanel()
 	RefreshBagHighlights()
 	if not panel then return end
@@ -1242,8 +950,7 @@ local function CreatePanel()
 		end
 	end)
 	nextButton:Hide()
-	CreateQuickAttachToggle()
-	CreateSettingsButton()
+	if PO.QuickAttachCreate then PO.QuickAttachCreate() end
 	CreateScrollBar()
 	CreateGrip()
 
@@ -1270,14 +977,12 @@ end
 -- Events
 ---------------------------------------------------------------------------
 
-local quickAttachHooked = false
 local mailOpen = false
 
 local function OnMailOpened()
 	if not panel and SendMailFrame and MailFrame then CreatePanel() end
-	if not quickAttachHooked then quickAttachHooked = HookQuickAttach() end
 	HidePostageLabel()
-	ApplyQuickAttachVisibility()
+	if PO.QuickAttachApply then PO.QuickAttachApply() end
 	if not mailOpen then
 		mailOpen = true
 		autoBlocked = false

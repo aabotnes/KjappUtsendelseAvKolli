@@ -5,9 +5,8 @@
 --
 -- How: while the inbox list is drawn, the inbox query functions are swapped for
 -- versions that describe groups instead of letters. Afterwards every row is
--- pointed back at its real first letter, and the row actions that work on
--- letter numbers (Postal's Select checkboxes and DoNotWant button, shift-click)
--- are translated so they act on the right letters.
+-- pointed back at its real first letter, and row actions (shift-click, the
+-- tick boxes and return/delete icons in InboxTools.lua) act on every letter in it.
 
 local INBOX_ROWS = INBOXITEMS_TO_DISPLAY or 7
 local MAX_RECEIVE = ATTACHMENTS_MAX_RECEIVE or 16
@@ -145,8 +144,6 @@ local function PostFix()
 	wipe(rowGroup)
 	if not active or not InboxFrame then return end
 	local base = ((InboxFrame.pageNum or 1) - 1) * INBOX_ROWS
-	local Select = Postal and Postal.GetModule and Postal:GetModule("Select", true)
-	local selected = Select and Select.GetSelectedMail and Select:GetSelectedMail()
 	for i = 1, INBOX_ROWS do
 		local g = groups[base + i]
 		local button = _G["MailItem" .. i .. "Button"]
@@ -166,21 +163,6 @@ local function PostFix()
 				end
 			end
 
-			local cb = _G["PostalInboxCB" .. i]
-			if cb and cb:IsShown() then
-				local all = selected ~= nil
-				for _, m in ipairs(g.members) do
-					if not (selected and selected[m]) then all = false end
-				end
-				cb:SetChecked(all)
-				if cb.text then cb.text:SetText(g.members[1]) end
-			end
-
-			-- Postal's DoNotWant deletes or returns one letter; don't offer it for a group.
-			local expire = _G["MailItem" .. i .. "ExpireTime"]
-			if expire and expire.returnicon and #g.members > 1 then
-				expire.returnicon:Hide()
-			end
 		end
 	end
 end
@@ -436,26 +418,41 @@ end
 
 local hooked = {}
 
+local function AfterDraw()
+	if depth == 0 and KUK.AfterInboxDraw then KUK.AfterInboxDraw() end
+end
+
 local function WrapGlobal(name)
 	if hooked[name] or type(_G[name]) ~= "function" then return end
 	local orig = _G[name]
-	_G[name] = function(...) return Virtually(orig, ...) end
+	_G[name] = function(...)
+		Virtually(orig, ...)
+		AfterDraw()
+	end
 	hooked[name] = true
 end
 
 local function WrapMethod(obj, method, tag)
 	if not obj or hooked[tag] or type(obj[method]) ~= "function" then return end
 	local orig = obj[method]
-	obj[method] = function(...) return Virtually(orig, ...) end
+	obj[method] = function(...)
+		Virtually(orig, ...)
+		AfterDraw()
+	end
 	hooked[tag] = true
 end
 
 local function WrapRowClicks()
-	-- Shift-click (Blizzard's auto-loot click, and Postal's Express) on a group row takes everything.
+	-- Shift-click (the game's take-everything click) on a group row takes everything,
+	-- and InboxTools handles its own modified clicks first.
 	for _, name in ipairs({ "InboxFrame_OnClick", "InboxFrame_OnModifiedClick" }) do
 		if not hooked[name] and type(_G[name]) == "function" then
 			local orig = _G[name]
 			_G[name] = function(self, index, ...)
+				if KUK.InboxRowClick and KUK.InboxRowClick(self, index) then
+					if self.SetChecked then self:SetChecked(false) end
+					return
+				end
 				if Enabled() and IsShiftKeyDown() then
 					local g = GroupOf(index)
 					if g and #g.members > 1 then
@@ -468,46 +465,6 @@ local function WrapRowClicks()
 			hooked[name] = true
 		end
 	end
-
-	local base = function() return ((InboxFrame.pageNum or 1) - 1) * INBOX_ROWS end
-	for i = 1, INBOX_ROWS do
-		-- Postal Select checkboxes: tick every letter in the row's group.
-		local cb = _G["PostalInboxCB" .. i]
-		if cb and not cb.kukWrapped then
-			local orig = cb:GetScript("OnClick")
-			cb:SetScript("OnClick", function(self, ...)
-				local row = self:GetID()
-				local g = rowGroup[row]
-				if not g then return orig(self, ...) end
-				local list = (IsShiftKeyDown() or IsControlKeyDown()) and { g.members[1] } or g.members
-				for _, m in ipairs(list) do
-					self:SetID(m - base())
-					orig(self, ...)
-				end
-				self:SetID(row)
-				InboxFrame:Update()
-			end)
-			cb.kukWrapped = true
-		end
-
-		-- Postal DoNotWant button: act on the row's real letter.
-		local expire = _G["MailItem" .. i .. "ExpireTime"]
-		local icon = expire and expire.returnicon
-		if icon and not icon.kukWrapped then
-			local orig = icon:GetScript("OnClick")
-			icon:SetScript("OnClick", function(self, ...)
-				local row = i
-				local g = rowGroup[row]
-				if not g then return orig(self, ...) end
-				if #g.members > 1 then return end
-				local saved = self.id
-				self.id = g.members[1] - base()
-				orig(self, ...)
-				self.id = saved
-			end)
-			icon.kukWrapped = true
-		end
-	end
 end
 
 local function InstallHooks(atMailbox)
@@ -515,12 +472,6 @@ local function InstallHooks(atMailbox)
 		WrapMethod(InboxFrame, "Update", "InboxFrame:Update")
 	end
 	WrapGlobal("InboxFrame_Update")
-	local Select = Postal and Postal.GetModule and Postal:GetModule("Select", true)
-	local DoNotWant = Postal and Postal.GetModule and Postal:GetModule("DoNotWant", true)
-	WrapMethod(Select, "InboxFrame_Update", "Select")
-	WrapMethod(DoNotWant, "InboxFrame_Update", "DoNotWant")
-	-- Row-click wrappers go on last, on top of Postal's own hooks (made at login),
-	-- so a shift-click on a group row reaches this addon first.
 	if atMailbox then WrapRowClicks() end
 	if not panel and OpenMailFrame then CreateCombinedPanel() end
 end
@@ -567,8 +518,27 @@ events:SetScript("OnEvent", function(_, event, ...)
 	end
 end)
 
--- Used by the options panel.
+-- Shared with InboxTools.lua.
 KUK = KUK or {}
+KUK.Inbox = {
+	real = real,
+	Enabled = function() return Enabled() end,
+	-- The real letters behind inbox row 1-7 on the current page.
+	RowLetters = function(row)
+		local g = rowGroup[row]
+		if g then return g.members end
+		local button = _G["MailItem" .. row .. "Button"]
+		if button and button:IsShown() and button.index then return { button.index } end
+	end,
+	-- The letters grouped with this one (just itself when it isn't in a group).
+	Group = function(index)
+		if not Enabled() then return { index } end
+		groups = BuildGroups()
+		local g = GroupOf(index)
+		return g and g.members or { index }
+	end,
+}
+
 function KUK.SetGroupingOff(off)
 	KUKDB = KUKDB or {}
 	KUKDB.groupingOff = off and true or false
