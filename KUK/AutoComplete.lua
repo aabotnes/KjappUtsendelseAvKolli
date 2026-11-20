@@ -1,7 +1,7 @@
 -- [Soeta's] Kjapp Utsendelse av Kolli: filling in the To field
 -- While you type a name, the first match from your sources is filled in, in an
 -- order you choose: your alts, friends, guild, recently mailed and contacts.
--- Always the plain character name, never "Name-Realm".
+-- Always the full character name ("Giga Dad"), never "Name-Realm".
 
 KUK = KUK or {}
 local PO = KUK
@@ -178,7 +178,7 @@ function PO.DebugFind(typed, say)
 	local online, offline = PO.Book.Friends()
 	local gOnline, gOffline = PO.Book.Guild()
 	say(("You: %s (%s). Known: %d alts, %d friends, %d guild members, %d recently mailed, %d contacts%s."):format(
-		tostring(UnitName("player")), tostring(UnitFactionGroup("player")),
+		tostring(PO.Book.PlayerName()), tostring(UnitFactionGroup("player")),
 		#PO.Book.Alts(), #online + #offline, #gOnline + #gOffline, #PO.Book.Recent(), #PO.Book.Contacts(),
 		DB().toFillOff and " (filling in is switched off)" or ""))
 	if text == "" then return end

@@ -133,7 +133,7 @@ function PO.GetQAProfileUsers(name)
 end
 
 function PO.CurrentCharacter()
-	return UnitName("player") or "?"
+	return (PO.Book and PO.Book.PlayerName and PO.Book.PlayerName()) or UnitName("player") or "?"
 end
 
 function PO.SetQAProfile(name)

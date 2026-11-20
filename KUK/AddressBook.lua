@@ -1,8 +1,8 @@
 -- [Soeta's] Kjapp Utsendelse av Kolli: address book
 -- Remembers your characters (alts), who you mailed recently and a contacts list,
 -- and adds a menu button beside the To field with alts, recently mailed,
--- contacts, friends and guild members. Names are always the plain character
--- name, without a realm.
+-- contacts, friends and guild members. Names are the full character name,
+-- first name and surname ("Giga Dad"), without a realm or ruleset suffix.
 
 KUK = KUK or {}
 local PO = KUK
@@ -20,13 +20,39 @@ local function Print(msg)
 	DEFAULT_CHAT_FRAME:AddMessage(PO.TITLE .. ": " .. msg)
 end
 
--- Just the character's name: anything after a "-" (a realm) is dropped.
+-- What goes between a first name and a surname on Forever (a space).
+local function Separator()
+	local c = Constants and Constants.CharacterNameSeparatorConsts
+	local sep = c and c.CHARACTERNAME_SURNAME_SEPARATOR
+	return (type(sep) == "string" and sep ~= "") and sep or " "
+end
+
+-- The full character name without a realm: anything after a "-" (a realm, or
+-- Forever's "-PvP" style ruleset) is dropped. The surname stays.
 local function Short(name)
 	if type(name) ~= "string" then return end
-	name = strtrim(name:match("^([^%-]+)") or name)
+	if Separator() ~= "-" then name = name:match("^([^%-]+)") or name end
+	name = strtrim(name)
 	return name ~= "" and name or nil
 end
 Book.Short = Short
+
+-- Your own full name. Forever returns the surname separately (or, on some
+-- builds, already joined to the first name).
+local function PlayerName()
+	local get = UnitNameUnmodified or UnitName
+	local first, surname = get("player")
+	if type(first) ~= "string" or first == "" then return end
+	if type(surname) == "string" and surname ~= "" and not first:find(surname, 1, true) then
+		return first .. Separator() .. surname
+	end
+	return first
+end
+Book.PlayerName = PlayerName
+
+local function FirstName(name)
+	return name and name:match("^(%S+)")
+end
 
 local function Lists()
 	local db = DB()
@@ -40,11 +66,42 @@ end
 -- Alts
 ---------------------------------------------------------------------------
 
+-- An alt saved with only a first name (by Postal or an earlier version) gets its
+-- surname as soon as the full name is known.
+local function Upgrade(alts, fullName, faction)
+	local first = FirstName(fullName)
+	if not first or first == fullName then return end
+	for i = #alts, 1, -1 do
+		local a = alts[i]
+		if a.name == first and (not faction or not a.faction or a.faction == faction) then
+			local exists = false
+			for _, b in ipairs(alts) do
+				if b.name == fullName then exists = true end
+			end
+			if exists then table.remove(alts, i) else a.name = fullName end
+		end
+	end
+end
+
+-- Syndicator (used by Baganator) knows the full names of all your characters.
+local function UpgradeFromSyndicator()
+	local api = Syndicator and Syndicator.API
+	if not (api and api.GetAllCharacters) then return end
+	local ok, list = pcall(api.GetAllCharacters)
+	if not ok or type(list) ~= "table" then return end
+	local alts = Lists().alts
+	for _, fullName in ipairs(list) do
+		local name = Short(fullName)
+		if name then Upgrade(alts, name, nil) end
+	end
+end
+
 local function RememberMe()
-	local name, faction = UnitName("player"), UnitFactionGroup("player")
+	local name, faction = PlayerName(), UnitFactionGroup("player")
 	if not name or not faction then return end
 	local _, class = UnitClass("player")
 	local alts = Lists().alts
+	Upgrade(alts, name, faction)
 	local entry
 	for _, a in ipairs(alts) do
 		if a.name == name and a.faction == faction then entry = a end
@@ -59,7 +116,7 @@ end
 
 -- Your other characters of the same faction.
 function Book.Alts()
-	local me, faction = UnitName("player"), UnitFactionGroup("player")
+	local me, faction = PlayerName(), UnitFactionGroup("player")
 	local list = {}
 	for _, a in ipairs(Lists().alts) do
 		if a.name ~= me and (not faction or not a.faction or a.faction == faction) then list[#list + 1] = a end
@@ -161,7 +218,7 @@ end
 function Book.Guild()
 	local online, offline = {}, {}
 	if not IsInGuild() then return online, offline end
-	local me = UnitName("player")
+	local me = PlayerName()
 	for i = 1, GetNumGuildMembers() or 0 do
 		local full, _, _, _, _, _, _, _, isOnline = GetGuildRosterInfo(i)
 		local name = Short(full)
@@ -352,10 +409,12 @@ events:SetScript("OnEvent", function(_, event)
 		Lists()
 		ImportPostal()
 		RememberMe()
+		UpgradeFromSyndicator()
 		if SendMailFrame then
 			SendMailFrame:HookScript("OnShow", function()
 				CreateMenuButton()
 				RememberMe()
+				UpgradeFromSyndicator()
 			end)
 		end
 	elseif event == "PLAYER_LEVEL_UP" then
