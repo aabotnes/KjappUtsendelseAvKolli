@@ -1,5 +1,11 @@
 # Kjapp Utsendelse av Kolli
 
+## v3.0.1
+
+- **Full names in the To field:** your alts are filled in as "First Surname", the way Forever names characters. Alts saved with only a first name get their surname from your next login on them, or straight away from Syndicator (Baganator) if it's installed.
+- **Baganator:** items in the extra slots now look greyed out in Baganator's bags too, not only in Blizzard's.
+- Characters are remembered by name, since the realm name Forever reports isn't reliable. QuickAttach choices from earlier versions carry over.
+
 ## v3.0.0
 
 - **One add-on, no Postal needed.** K.U.K. now has everything itself:
