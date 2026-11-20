@@ -50,8 +50,40 @@ end
 
 local ApplyVisibility
 
+-- Characters are known by name only: the realm name Forever reports isn't reliable.
 local function CharKey()
-	return (UnitName("player") or "?") .. " - " .. (GetRealmName() or "?")
+	return UnitName("player") or "?"
+end
+
+-- Earlier versions remembered Postal's buttons by their icon; these are the same buttons.
+local OLD_KEYS = {
+	["4620681"] = "cloth", ["4620678"] = "leather", ["4625105"] = "metal", ["4620671"] = "cooking",
+	["133939"] = "herb", ["4620672"] = "enchanting", ["4620676"] = "inscription", ["4620677"] = "jewelcrafting",
+	["132845"] = "elemental", ["133010"] = "parts", ["132529"] = "optional", ["134422"] = "other", ["132149"] = "all",
+}
+
+local function Migrate(db)
+	-- "Name - Realm" keys from earlier versions become plain names.
+	local renamed = {}
+	for key, profile in pairs(db.qaProfileByChar) do
+		local name = type(key) == "string" and key:match("^(.-) %- ")
+		if name and name ~= "" then renamed[key] = { name, profile } end
+	end
+	for key, pair in pairs(renamed) do
+		db.qaProfileByChar[key] = nil
+		if db.qaProfileByChar[pair[1]] == nil then db.qaProfileByChar[pair[1]] = pair[2] end
+	end
+	for _, p in pairs(db.qaProfiles) do
+		if type(p) == "table" and type(p.hidden) == "table" then
+			for old, new in pairs(OLD_KEYS) do
+				if p.hidden[old] ~= nil then
+					if p.hidden[new] == nil then p.hidden[new] = p.hidden[old] end
+					p.hidden[old] = nil
+				end
+			end
+		end
+	end
+	db.qaMigrated = 2
 end
 
 local function QAProfiles()
@@ -62,6 +94,7 @@ local function QAProfiles()
 	end
 	if type(db.qaProfiles.Default) ~= "table" then db.qaProfiles.Default = {} end
 	if type(db.qaProfileByChar) ~= "table" then db.qaProfileByChar = {} end
+	if db.qaMigrated ~= 2 then Migrate(db) end
 	return db.qaProfiles
 end
 
