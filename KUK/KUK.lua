@@ -1037,6 +1037,45 @@ local function IsMailPane(paneType)
 	return Enum and Enum.PlayerInteractionType and paneType == Enum.PlayerInteractionType.MailInfo
 end
 
+---------------------------------------------------------------------------
+-- No "You cannot attach more than 12 items to mail" error
+---------------------------------------------------------------------------
+-- With all 12 real slots full, the game refuses the next item and shows that
+-- error (with its sound) before this addon puts the item in an extra slot. The
+-- game's error frame can switch off one kind of error; that's done for this one.
+
+local function HideErrorType(messageType)
+	if type(messageType) == "number" and UIErrorsFrame and UIErrorsFrame.SetMessageTypeEnabled then
+		UIErrorsFrame:SetMessageTypeEnabled(messageType, false)
+	end
+end
+
+-- Find the error among the game's error types: an "attach" error about the limit.
+local function FindAttachLimitError()
+	if DB().attachErrorType then HideErrorType(DB().attachErrorType) end
+	if not GetGameMessageInfo then return end
+	local limit = tostring(MAX)
+	for key, value in pairs(_G) do
+		if type(key) == "string" and type(value) == "number" and key:find("^LE_GAME_ERR_") and key:find("ATTACH") then
+			local ok, stringId = pcall(GetGameMessageInfo, value)
+			local text = ok and type(stringId) == "string" and _G[stringId]
+			if type(text) == "string" and (text:find(limit, 1, true) or text:find("%d", 1, true)) then
+				HideErrorType(value)
+			end
+		end
+	end
+end
+
+-- If it still shows up (for example under another name), recognise it by when it
+-- happens: all 12 real slots full, and the limit in the message.
+local function CheckError(messageType, message)
+	if not (SendTabOpen() and AttachedCount() >= MAX) then return end
+	if type(message) ~= "string" or not message:find(tostring(MAX), 1, true) then return end
+	HideErrorType(messageType)
+	DB().attachErrorType = messageType
+	if UIErrorsFrame and UIErrorsFrame.Clear then UIErrorsFrame:Clear() end
+end
+
 local events = CreateFrame("Frame")
 -- Forever, like Retail, reports the mailbox through PLAYER_INTERACTION_MANAGER_FRAME_*
 -- instead of MAIL_SHOW/MAIL_CLOSED. Registering an event the game doesn't have is an
@@ -1045,13 +1084,19 @@ for _, event in ipairs({
 	"PLAYER_LOGIN", "MAIL_SHOW", "MAIL_CLOSED",
 	"PLAYER_INTERACTION_MANAGER_FRAME_SHOW", "PLAYER_INTERACTION_MANAGER_FRAME_HIDE",
 	"MAIL_SEND_SUCCESS", "MAIL_FAILED", "MAIL_SEND_INFO_UPDATE", "BAG_UPDATE_DELAYED",
+	"UI_ERROR_MESSAGE",
 }) do
 	if not (C_EventUtils and C_EventUtils.IsEventValid) or C_EventUtils.IsEventValid(event) then
 		pcall(events.RegisterEvent, events, event)
 	end
 end
 events:SetScript("OnEvent", function(_, event, ...)
+	if event == "UI_ERROR_MESSAGE" then
+		CheckError(...)
+		return
+	end
 	if event == "PLAYER_LOGIN" then
+		pcall(FindAttachLimitError)
 		-- Also follow the mail window itself, in case no mailbox event arrives.
 		if SendMailFrame then SendMailFrame:HookScript("OnShow", OnMailOpened) end
 		if MailFrame then MailFrame:HookScript("OnHide", OnMailClosed) end

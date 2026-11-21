@@ -1,5 +1,9 @@
 # Kjapp Utsendelse av Kolli
 
+## v3.1.1
+
+- No more red **"You cannot attach more than 12 items to mail"** error (or its sound) when items go into the extra slots. Other errors still show.
+
 ## v3.1.0
 
 - **Open letters use the Send Mail grid:** rows of 7 in reading order, the same number of rows as the Send Mail window (taller if you made it taller), the same slot limit and scroll bar.
