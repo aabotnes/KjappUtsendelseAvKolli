@@ -2,7 +2,7 @@
 ## Title: |cffc27dff[Soeta's]|r Kjapp Utsendelse av Kolli
 ## Notes: |cffc27dff[Soeta's]|r Everything for the mailbox: 36 attachment slots (sent as letters of 12), QuickAttach buttons with profiles, an address book with a To field that finds your alts first, inbox tick boxes, return/delete icons, grouped letters, forward and a gold summary. /kuk
 ## Author: Soeta
-## Version: v3.0.1
+## Version: v3.1.0
 ## Category: Mail
 ## OptionalDeps: Postal
 ## SavedVariables: KUKDB

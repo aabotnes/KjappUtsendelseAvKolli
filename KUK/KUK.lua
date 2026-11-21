@@ -508,6 +508,9 @@ local function VisibleRows()
 	return 2 + AddedRows()
 end
 
+-- Shared with the open-letter grid (Inbox.lua), so both grids look the same.
+PO.GridVisibleRows = function() return VisibleRows() end
+
 local function MaxTop()
 	return math.max(0, TotalRows() - VisibleRows())
 end
@@ -745,6 +748,7 @@ function PO.SetAddedRows(k)
 	DB().addedRows = k
 	ApplyHeight()
 	UpdatePanel()
+	if PO.LetterGridRefresh then PO.LetterGridRefresh() end
 	return k
 end
 
@@ -826,6 +830,7 @@ function PO.SetMaxItems(n)
 	DB().maxItems = clamped
 	ApplyHeight()
 	UpdatePanel()
+	if PO.LetterGridRefresh then PO.LetterGridRefresh() end
 	return clamped, clamped ~= n, lowest
 end
 

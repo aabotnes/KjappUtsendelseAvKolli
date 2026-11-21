@@ -1,5 +1,10 @@
 # Kjapp Utsendelse av Kolli
 
+## v3.1.0
+
+- **Open letters use the Send Mail grid:** rows of 7 in reading order, the same number of rows as the Send Mail window (taller if you made it taller), the same slot limit and scroll bar.
+- **Grouped letters in one grid:** the gold from all the letters and every item show together in the letter's own grid, instead of a separate panel on the right. **Take all** above the grid empties the whole group.
+
 ## v3.0.1
 
 - **Full names in the To field:** your alts are filled in as "First Surname", the way Forever names characters. Alts saved with only a first name get their surname from your next login on them, or straight away from Syndicator (Baganator) if it's installed.

@@ -1,7 +1,7 @@
 -- [Soeta's] Kjapp Utsendelse av Kolli: inbox grouping
 -- Letters from the same sender with the same subject (ignoring a "(2/3)" style
 -- suffix) and the same text are shown as one inbox row. Opening the row shows
--- a "Combined letter" panel with every attachment from all of its letters.
+-- the gold and every attachment from all of its letters in the letter's grid.
 --
 -- How: while the inbox list is drawn, the inbox query functions are swapped for
 -- versions that describe groups instead of letters. Afterwards every row is
@@ -10,7 +10,7 @@
 
 local INBOX_ROWS = INBOXITEMS_TO_DISPLAY or 7
 local MAX_RECEIVE = ATTACHMENTS_MAX_RECEIVE or 16
-local COLS, VISIBLE_ROWS, SIZE, GAP, PAD = 6, 6, 37, 4, 12
+local PER_ROW = 7
 
 -- The real inbox functions, saved before anything is swapped.
 local real = {
@@ -30,8 +30,6 @@ local broken = false    -- the game drew the inbox without our functions; stop g
 local depth, virtualUsed = 0, false
 local swapped = {}
 local looting           -- "Take all" in progress
-local panel, statusText, moneyText, takeAllButton
-local buttons, entries, scrollRow = {}, {}, 0
 
 local function Print(msg)
 	DEFAULT_CHAT_FRAME:AddMessage((KUK and KUK.TITLE or "Kjapp Utsendelse av Kolli") .. ": " .. msg)
@@ -237,7 +235,8 @@ local function LootStep()
 		looting.stalls = 0
 	end
 	looting.lastRemaining = remaining
-	for _, i in ipairs(g.members) do
+	for n = #g.members, 1, -1 do
+		local i = g.members[n]
 		local _, _, _, _, money, _, _, itemCount = real.GetInboxHeaderInfo(i)
 		if (money or 0) > 0 or (itemCount or 0) > 0 then
 			AutoLootMailItem(i)
@@ -254,8 +253,12 @@ local function TakeAll(g)
 end
 
 ---------------------------------------------------------------------------
--- Combined letter panel (next to an open letter)
+-- The open letter's attachment grid
 ---------------------------------------------------------------------------
+-- An open letter shows its gold and items in the same grid as the Send Mail
+-- window: rows of 7 in reading order, as many rows as the Send Mail window shows
+-- (more if you made it taller), the same slot limit and a scroll bar past that.
+-- A grouped row shows the gold and items of all its letters in this one grid.
 
 local function OpenGroup()
 	if depth > 0 then return end -- never regroup in the middle of drawing the list
@@ -282,123 +285,334 @@ local function OpenGroup()
 	return g
 end
 
-local function MaxScroll()
-	return math.max(0, math.ceil(#entries / COLS) - VISIBLE_ROWS)
+local cells, entries = {}, {}
+local letterTop = 0         -- first grid row in view
+local letterBaseHeight      -- the letter window's own height
+local letterBar, takeAllButton, updatingBar
+local LayoutLetter
+
+local function BlizzardButtons()
+	local list = { OpenMailLetterButton, OpenMailMoneyButton }
+	for i = 1, (ATTACHMENTS_MAX or 16) do list[#list + 1] = _G["OpenMailAttachmentButton" .. i] end
+	return list
 end
 
-local UpdateCombined
+-- Same spacing as the game's letter window, and the Send Mail window's row step.
+local function Metrics()
+	local a1 = OpenMailAttachmentButton1
+	local iconx = (a1 and a1:GetWidth() or 37) + 2
+	local icony = (a1 and a1:GetHeight() or 37) + 2
+	local areax = OpenMailFrame:GetWidth() - 14 - 47
+	local gapx1 = math.floor((areax - iconx * PER_ROW) / (PER_ROW - 1))
+	local gapx2 = math.floor((areax - iconx * PER_ROW - gapx1 * (PER_ROW - 1)) / 2)
+	return { x = 14 + gapx2, tabx = iconx + gapx1 + 6, y = 31 + icony, taby = icony + 5, icony = icony }
+end
 
-local function CreateSlot(i)
-	local b = CreateFrame("Button", nil, panel)
-	b:SetSize(SIZE, SIZE)
-	local row, col = math.floor((i - 1) / COLS), (i - 1) % COLS
-	b:SetPoint("TOPLEFT", PAD + col * (SIZE + GAP), -62 - row * (SIZE + GAP))
-	b.icon = b:CreateTexture(nil, "ARTWORK")
-	b.icon:SetAllPoints()
-	b.count = b:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
-	b.count:SetPoint("BOTTOMRIGHT", -2, 2)
-	b:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
-	b:SetScript("OnEnter", function(self)
-		local e = entries[self.entry]
-		if not e then return end
-		GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+local function VisibleRows()
+	return (KUK.GridVisibleRows and KUK.GridVisibleRows()) or 2
+end
+
+local function TotalRows()
+	local slots = math.max((KUK.GetMaxItems and KUK.GetMaxItems()) or 36, #entries)
+	return math.ceil(slots / PER_ROW)
+end
+
+local function MaxTop()
+	return math.max(0, TotalRows() - VisibleRows())
+end
+
+-- Take the gold from every letter in a group, last letter first.
+local function TakeGroupMoney(members)
+	local list = {}
+	for _, i in ipairs(members) do
+		local _, _, _, _, money = real.GetInboxHeaderInfo(i)
+		if (money or 0) > 0 then list[#list + 1] = i end
+	end
+	table.sort(list, function(a, b) return a > b end)
+	local function step()
+		local i = table.remove(list, 1)
+		if not i then return end
+		TakeInboxMoney(i)
+		if #list > 0 then C_Timer.After(0.4, step) end
+	end
+	step()
+end
+
+local function CellOnEnter(self)
+	local e = entries[self.entry]
+	if not e then return end
+	GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+	if e.kind == "item" then
 		GameTooltip:SetInboxItem(e.mail, e.att)
-		GameTooltip:Show()
-	end)
+		if e.single and OpenMailFrame.cod then
+			GameTooltip_AddMoneyLine(GameTooltip, OpenMailFrame.cod, OpenMailFrame.cod > GetMoney())
+		end
+	elseif e.kind == "money" then
+		GameTooltip:SetText(MONEY or "Money", 1, 1, 1)
+		GameTooltip:AddLine(GetCoinTextureString(e.money), 1, 1, 1)
+	elseif e.kind == "letter" then
+		local onEnter = OpenMailLetterButton and OpenMailLetterButton:GetScript("OnEnter")
+		if onEnter then return onEnter(OpenMailLetterButton) end
+		GameTooltip:SetText(MAIL_LETTER_TOOLTIP or "Take a copy of the letter", 1, 1, 1)
+	end
+	GameTooltip:Show()
+end
+
+local function CellOnClick(self, mouse)
+	local e = entries[self.entry]
+	if not e then return end
+	if e.kind == "item" then
+		if IsModifiedClick("CHATLINK") then
+			local link = real.GetInboxItemLink and real.GetInboxItemLink(e.mail, e.att)
+			if link then HandleModifiedItemClick(link) end
+			return
+		end
+		if e.single then
+			-- The game's own click: it asks first for cash-on-delivery letters.
+			OpenMailAttachment_OnClick(_G["OpenMailAttachmentButton" .. e.att] or self, e.att)
+		else
+			TakeInboxItem(e.mail, e.att)
+		end
+	elseif e.kind == "money" then
+		if e.single then OpenMailMoneyButton:Click(mouse) else TakeGroupMoney(e.members) end
+	elseif e.kind == "letter" then
+		OpenMailLetterButton:Click(mouse)
+	end
+end
+
+local function Scroll(delta)
+	local top = math.max(0, math.min(letterTop - delta, MaxTop()))
+	if top ~= letterTop then
+		letterTop = top
+		LayoutLetter()
+	end
+end
+
+local function CreateCell(n)
+	local ok, b = pcall(CreateFrame, "Button", "KUKLetterSlot" .. n, OpenMailFrame, "ItemButtonTemplate")
+	if not ok or not b then
+		b = CreateFrame("Button", "KUKLetterSlot" .. n, OpenMailFrame)
+		b:SetSize(37, 37)
+		b.icon = b:CreateTexture(nil, "ARTWORK")
+		b.icon:SetAllPoints()
+		b.Count = b:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
+		b.Count:SetPoint("BOTTOMRIGHT", -5, 2)
+		b:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
+	end
+	b.empty = b:CreateTexture(nil, "BACKGROUND")
+	b.empty:SetTexture("Interface\\Buttons\\UI-Slot-Background")
+	b.empty:SetSize(39, 39)
+	b.empty:SetPoint("TOPLEFT", -1, 1)
+	b.empty:SetTexCoord(0, 0.640625, 0, 0.640625)
+	b:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+	b:SetScript("OnClick", CellOnClick)
+	b:SetScript("OnEnter", CellOnEnter)
 	b:SetScript("OnLeave", GameTooltip_Hide)
-	b:SetScript("OnClick", function(self)
-		local e = entries[self.entry]
-		if e then TakeInboxItem(e.mail, e.att) end
-	end)
-	buttons[i] = b
+	b:EnableMouseWheel(true)
+	b:SetScript("OnMouseWheel", function(_, delta) Scroll(delta) end)
+	cells[n] = b
 	return b
 end
 
-function UpdateCombined()
-	if not panel then return end
-	local g = OpenGroup()
-	if not g then
-		panel:Hide()
+local function SetCell(b, e)
+	b.empty:SetShown(not e)
+	if not e then
+		SetItemButtonTexture(b, nil)
+		SetItemButtonCount(b, 0)
+		if b.IconBorder then SetItemButtonQuality(b, nil) end
 		return
 	end
+	SetItemButtonTexture(b, e.icon)
+	SetItemButtonCount(b, e.count or 0)
+	if b.IconBorder then SetItemButtonQuality(b, e.quality, e.itemID) end
+	if e.canUse == false then
+		SetItemButtonTextureVertexColor(b, 1.0, 0.1, 0.1)
+	else
+		SetItemButtonTextureVertexColor(b, 1, 1, 1)
+	end
+end
+
+-- Everything the open letter (or its group) holds, in order: letter copy, gold, items.
+local function CollectEntries()
 	wipe(entries)
+	local id = InboxFrame and InboxFrame.openMailID
+	if not id or id == 0 then return end
+	local g = OpenGroup()
+	local members = g and g.members or { id }
+	local single = #members == 1
+	if single and OpenMailLetterButton then
+		-- A copy of the letter can be taken, as in the game, when it has text and
+		-- hasn't been copied yet.
+		local _, _, _, isTakeable = real.GetInboxText(id)
+		local _, stationery, _, _, _, _, _, _, _, _, textCreated = real.GetInboxHeaderInfo(id)
+		if isTakeable and not textCreated then
+			entries[#entries + 1] = { kind = "letter", icon = stationery or "Interface\\Icons\\INV_Misc_Note_01" }
+		end
+	end
 	local money = 0
-	for _, i in ipairs(g.members) do
+	for _, i in ipairs(members) do
 		local _, _, _, _, m = real.GetInboxHeaderInfo(i)
 		money = money + (m or 0)
+	end
+	if money > 0 then
+		entries[#entries + 1] = { kind = "money", money = money, members = members, single = single,
+			icon = C_CurrencyInfo and C_CurrencyInfo.GetCoinIcon and C_CurrencyInfo.GetCoinIcon(money) or "Interface\\Icons\\INV_Misc_Coin_01" }
+	end
+	for _, i in ipairs(members) do
 		for a = 1, MAX_RECEIVE do
-			local name, _, texture, count = real.GetInboxItem(i, a)
-			if name or texture then
-				entries[#entries + 1] = { mail = i, att = a, icon = texture, count = count or 1 }
+			if HasInboxItem(i, a) then
+				local name, itemID, texture, count, quality, canUse = real.GetInboxItem(i, a)
+				entries[#entries + 1] = {
+					kind = "item", mail = i, att = a, single = single,
+					icon = texture or "Interface\\Icons\\INV_Misc_QuestionMark",
+					count = count, quality = quality, itemID = itemID, canUse = canUse,
+				}
 			end
 		end
 	end
-	scrollRow = math.min(scrollRow, MaxScroll())
-	local shown = math.min(math.max(math.ceil(#entries / COLS), 1), VISIBLE_ROWS) * COLS
-	for i = 1, VISIBLE_ROWS * COLS do
-		local b = buttons[i] or CreateSlot(i)
-		local index = scrollRow * COLS + i
-		local e = entries[index]
-		b.entry = index
-		if e and i <= shown then
-			b.icon:SetTexture(e.icon)
-			b.count:SetText(e.count > 1 and e.count or "")
-			b:Show()
-		else
-			b:Hide()
-		end
-	end
-	statusText:SetText(("%d letters, %d items"):format(#g.members, #entries))
-	moneyText:SetText(money > 0 and GetCoinTextureString(money) or "")
-	takeAllButton:SetEnabled(not looting and (#entries > 0 or money > 0))
-	panel:SetHeight(62 + (shown / COLS) * (SIZE + GAP) + 34)
-	panel:Show()
+	return g, members
 end
 
-local function CreateCombinedPanel()
-	panel = CreateFrame("Frame", "KUKCombinedFrame", OpenMailFrame, "BackdropTemplate")
-	panel:SetWidth(PAD * 2 + COLS * (SIZE + GAP) - GAP)
-	panel:SetPoint("TOPLEFT", OpenMailFrame, "TOPRIGHT", 2, 0)
-	panel:SetBackdrop({
-		bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
-		edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-		tile = true, tileSize = 16, edgeSize = 16,
-		insets = { left = 4, right = 4, top = 4, bottom = 4 },
-	})
-	panel:SetBackdropColor(0.05, 0.05, 0.05, 0.92)
-	panel:EnableMouse(true)
-	panel:EnableMouseWheel(true)
-	panel:SetScript("OnMouseWheel", function(_, delta)
-		scrollRow = math.max(0, math.min(MaxScroll(), scrollRow - delta))
-		UpdateCombined()
+local function CreateLetterBar()
+	letterBar = CreateFrame("Slider", "KUKLetterScrollBar", OpenMailFrame)
+	letterBar:SetOrientation("VERTICAL")
+	letterBar:SetWidth(8)
+	local track = letterBar:CreateTexture(nil, "BACKGROUND")
+	track:SetAllPoints()
+	track:SetColorTexture(0, 0, 0, 0.4)
+	local thumb = letterBar:CreateTexture(nil, "OVERLAY")
+	thumb:SetColorTexture(1, 0.82, 0, 0.75)
+	thumb:SetSize(8, 24)
+	letterBar:SetThumbTexture(thumb)
+	letterBar.thumb = thumb
+	letterBar:SetValueStep(1)
+	if letterBar.SetObeyStepOnDrag then letterBar:SetObeyStepOnDrag(true) end
+	letterBar:SetScript("OnValueChanged", function(_, value)
+		if updatingBar then return end
+		value = math.floor(value + 0.5)
+		if value ~= letterTop then
+			letterTop = value
+			LayoutLetter()
+		end
 	end)
+	letterBar:EnableMouseWheel(true)
+	letterBar:SetScript("OnMouseWheel", function(_, delta) Scroll(delta) end)
+	letterBar:Hide()
 
-	local title = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-	title:SetPoint("TOPLEFT", PAD, -12)
-	title:SetText("Combined letter")
-
-	statusText = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	statusText:SetPoint("TOPLEFT", PAD, -29)
-
-	moneyText = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	moneyText:SetPoint("TOPLEFT", PAD, -44)
-
-	takeAllButton = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-	takeAllButton:SetSize(100, 22)
-	takeAllButton:SetPoint("BOTTOMRIGHT", -PAD + 2, 10)
+	takeAllButton = CreateFrame("Button", "KUKLetterTakeAll", OpenMailFrame, "UIPanelButtonTemplate")
+	takeAllButton:SetSize(84, 20)
 	takeAllButton:SetText("Take all")
 	takeAllButton:SetScript("OnClick", function()
-		TakeAll(OpenGroup())
-		UpdateCombined()
+		local id = InboxFrame and InboxFrame.openMailID
+		if not id or id == 0 then return end
+		local g = OpenGroup()
+		if g then
+			TakeAll(g)
+		else
+			local _, _, _, _, _, cod = real.GetInboxHeaderInfo(id)
+			if (cod or 0) > 0 then return Print("Cash-on-delivery letters are taken one item at a time.") end
+			AutoLootMailItem(id)
+		end
 	end)
+	takeAllButton:Hide()
+end
 
-	panel:Hide()
-	OpenMailFrame:HookScript("OnShow", function()
-		scrollRow = 0
-		UpdateCombined()
-	end)
+function LayoutLetter()
+	if not (OpenMailFrame and OpenMailFrame:IsShown() and InboxFrame) then return end
+	if not letterBar then CreateLetterBar() end
+	if not letterBaseHeight then letterBaseHeight = OpenMailFrame:GetHeight() end
+	local g, members = CollectEntries()
+	local m = Metrics()
+	local rows = VisibleRows()
+	letterTop = math.max(0, math.min(letterTop, MaxTop()))
+
+	-- The window grows like the Send Mail window; the letter text keeps its two-row size.
+	OpenMailFrame:SetHeight(letterBaseHeight + m.taby * (rows - 2))
+	local textH = OpenMailAttachmentText and OpenMailAttachmentText:GetHeight() or 12
+	local function AreaY(n) return 3 + textH + 3 + m.icony * n + 5 * (n - 1) + 3 end
+	local scrollHeight = math.min(256, 305 - AreaY(2))
+	OpenMailScrollFrame:SetHeight(scrollHeight)
+	if OpenMailScrollChildFrame then OpenMailScrollChildFrame:SetHeight(scrollHeight) end
+	for _, t in ipairs({ OpenStationeryBackgroundLeft, OpenStationeryBackgroundRight }) do
+		if t then
+			t:SetHeight(scrollHeight)
+			t:SetTexCoord(0, 1, 0, math.min(scrollHeight, 256) / 256)
+		end
+	end
+	if OpenMailHorizontalBarLeft then
+		OpenMailHorizontalBarLeft:SetPoint("TOPLEFT", OpenMailFrame, "BOTTOMLEFT", 2, 39 + AreaY(rows))
+	end
+
+	-- The game's own buttons step aside for the grid.
+	for _, b in ipairs(BlizzardButtons()) do
+		if b then b:Hide() end
+	end
+
+	local topY = m.y + m.taby * (rows - 1)
+	if OpenMailAttachmentText then
+		local n = members and #members or 1
+		if #entries == 0 then
+			OpenMailAttachmentText:SetText(NO_ATTACHMENTS)
+			OpenMailAttachmentText:SetTextColor(GRAY_FONT_COLOR.r, GRAY_FONT_COLOR.g, GRAY_FONT_COLOR.b)
+		elseif n > 1 then
+			OpenMailAttachmentText:SetText(("%s  |cff33ff99%d letters|r"):format(TAKE_ATTACHMENTS, n))
+			OpenMailAttachmentText:SetTextColor(HIGHLIGHT_FONT_COLOR.r, HIGHLIGHT_FONT_COLOR.g, HIGHLIGHT_FONT_COLOR.b)
+		else
+			OpenMailAttachmentText:SetText(TAKE_ATTACHMENTS)
+			OpenMailAttachmentText:SetTextColor(HIGHLIGHT_FONT_COLOR.r, HIGHLIGHT_FONT_COLOR.g, HIGHLIGHT_FONT_COLOR.b)
+		end
+		OpenMailAttachmentText:ClearAllPoints()
+		OpenMailAttachmentText:SetPoint("TOPLEFT", OpenMailFrame, "BOTTOMLEFT", m.x, topY + 3 + textH)
+	end
+	takeAllButton:ClearAllPoints()
+	takeAllButton:SetPoint("BOTTOMRIGHT", OpenMailFrame, "BOTTOMLEFT", m.x + m.tabx * (PER_ROW - 1) + m.icony - 2, topY + 3)
+	takeAllButton:SetShown(#entries > 1 or (g ~= nil and #entries > 0))
+	takeAllButton:SetEnabled(not looting)
+
+	local total = TotalRows() * PER_ROW
+	for n = 1, math.max(total, #cells) do
+		local b = cells[n] or (n <= total and CreateCell(n))
+		if b then
+			local row, col = math.floor((n - 1) / PER_ROW), (n - 1) % PER_ROW
+			if n <= total and row >= letterTop and row < letterTop + rows then
+				local fromBottom = rows - 1 - (row - letterTop)
+				b:ClearAllPoints()
+				b:SetPoint("TOPLEFT", OpenMailFrame, "BOTTOMLEFT", m.x + m.tabx * col, m.y + m.taby * fromBottom)
+				b.entry = n
+				SetCell(b, entries[n])
+				b:Show()
+				if GameTooltip:IsOwned(b) then CellOnEnter(b) end
+			else
+				b:Hide()
+			end
+		end
+	end
+
+	local maxTop = MaxTop()
+	if maxTop > 0 then
+		local height = m.taby * (rows - 1) + m.icony - 2
+		letterBar:ClearAllPoints()
+		letterBar:SetPoint("TOPLEFT", OpenMailFrame, "BOTTOMLEFT", m.x + m.tabx * (PER_ROW - 1) + m.icony, topY)
+		letterBar:SetHeight(height)
+		letterBar.thumb:SetHeight(math.max(12, height * rows / TotalRows()))
+		updatingBar = true
+		letterBar:SetMinMaxValues(0, maxTop)
+		letterBar:SetValue(letterTop)
+		updatingBar = false
+		letterBar:Show()
+	else
+		letterBar:Hide()
+	end
+end
+
+KUK.LetterGridRefresh = function()
+	if OpenMailFrame and OpenMailFrame:IsShown() then LayoutLetter() end
+end
+
+local function HookLetter()
+	OpenMailFrame:HookScript("OnShow", function() letterTop = 0 end)
 	hooksecurefunc(OpenMailFrame, "Update", function()
-		UpdateCombined()
+		LayoutLetter()
 		-- If the opened row was a group but its letters' texts turned out to
 		-- differ, the group has split: redraw the list so the rows match.
 		local id = InboxFrame and InboxFrame.openMailID
@@ -473,7 +687,10 @@ local function InstallHooks(atMailbox)
 	end
 	WrapGlobal("InboxFrame_Update")
 	if atMailbox then WrapRowClicks() end
-	if not panel and OpenMailFrame then CreateCombinedPanel() end
+	if OpenMailFrame and not hooked.letter then
+		HookLetter()
+		hooked.letter = true
+	end
 end
 
 ---------------------------------------------------------------------------
@@ -507,7 +724,7 @@ events:SetScript("OnEvent", function(_, event, ...)
 	elseif event == "MAIL_SHOW" or (event == "PLAYER_INTERACTION_MANAGER_FRAME_SHOW" and IsMailPane(...)) then
 		InstallHooks(true)
 	elseif event == "MAIL_INBOX_UPDATE" then
-		if panel and panel:IsShown() or (OpenMailFrame and OpenMailFrame:IsShown()) then UpdateCombined() end
+		if OpenMailFrame and OpenMailFrame:IsShown() then LayoutLetter() end
 	elseif event == "MAIL_CLOSED" or (event == "PLAYER_INTERACTION_MANAGER_FRAME_HIDE" and IsMailPane(...)) then
 		looting = nil
 	elseif event == "UI_ERROR_MESSAGE" then
