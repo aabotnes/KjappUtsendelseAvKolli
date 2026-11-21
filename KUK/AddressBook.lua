@@ -83,35 +83,72 @@ local function Upgrade(alts, fullName, faction)
 	end
 end
 
--- Syndicator (used by Baganator) knows the full names of all your characters.
-local function UpgradeFromSyndicator()
-	local api = Syndicator and Syndicator.API
-	if not (api and api.GetAllCharacters) then return end
-	local ok, list = pcall(api.GetAllCharacters)
-	if not ok or type(list) ~= "table" then return end
+local function SortAlts(alts)
+	table.sort(alts, function(x, y) return x.name < y.name end)
+end
+
+local function Forgotten()
+	local db = DB()
+	if type(db.forgottenAlts) ~= "table" then db.forgottenAlts = {} end
+	return db.forgottenAlts
+end
+
+-- Add an alt, or fill in what's missing about one already known.
+local function AddAlt(name, faction, class, level)
 	local alts = Lists().alts
-	for _, fullName in ipairs(list) do
-		local name = Short(fullName)
-		if name then Upgrade(alts, name, nil) end
+	Upgrade(alts, name, faction)
+	for _, a in ipairs(alts) do
+		if a.name == name and (not faction or not a.faction or a.faction == faction) then
+			a.faction = a.faction or faction
+			a.class = a.class or class
+			a.level = a.level or level
+			return a, false
+		end
 	end
+	local entry = { name = name, faction = faction, class = class, level = level }
+	alts[#alts + 1] = entry
+	SortAlts(alts)
+	return entry, true
+end
+
+-- WoW doesn't tell add-ons which characters are on your account, but Syndicator
+-- (part of Baganator) records every character you play. Its list fills in your
+-- alts here, so they don't each need a login first.
+local function ImportFromSyndicator()
+	local api = Syndicator and Syndicator.API
+	if not (api and api.GetAllCharacters) then return 0 end
+	local ok, list = pcall(api.GetAllCharacters)
+	if not ok or type(list) ~= "table" then return 0 end
+	local added, forgotten = 0, Forgotten()
+	for _, fullName in ipairs(list) do
+		local data = api.GetCharacter and api.GetCharacter(fullName)
+		local details = type(data) == "table" and data.details or {}
+		local name = Short(details.character or fullName)
+		if name and not forgotten[name] then
+			local _, new = AddAlt(name, details.faction, details.className)
+			if new then added = added + 1 end
+		end
+	end
+	return added
+end
+Book.ImportFromSyndicator = ImportFromSyndicator
+
+-- Add someone as an alt by hand (from the address book menu).
+function Book.AddAlt(name)
+	name = Short(name)
+	if not name then return false end
+	Forgotten()[name] = nil
+	local _, new = AddAlt(name, UnitFactionGroup("player"))
+	return new
 end
 
 local function RememberMe()
 	local name, faction = PlayerName(), UnitFactionGroup("player")
 	if not name or not faction then return end
 	local _, class = UnitClass("player")
-	local alts = Lists().alts
-	Upgrade(alts, name, faction)
-	local entry
-	for _, a in ipairs(alts) do
-		if a.name == name and a.faction == faction then entry = a end
-	end
-	if not entry then
-		entry = { name = name, faction = faction }
-		alts[#alts + 1] = entry
-		table.sort(alts, function(x, y) return x.name < y.name end)
-	end
-	entry.level, entry.class = UnitLevel("player"), class
+	Forgotten()[name] = nil
+	local entry = AddAlt(name, faction, class)
+	entry.faction, entry.level, entry.class = faction, UnitLevel("player"), class
 end
 
 -- Your other characters of the same faction.
@@ -124,11 +161,13 @@ function Book.Alts()
 	return list
 end
 
+-- Forgotten alts aren't brought back by the Syndicator import.
 function Book.ForgetAlt(name)
 	local alts = Lists().alts
 	for i = #alts, 1, -1 do
 		if alts[i].name == name then table.remove(alts, i) end
 	end
+	Forgotten()[name] = true
 end
 
 ---------------------------------------------------------------------------
@@ -304,8 +343,17 @@ local function BuildMenu(_, root)
 	for _, a in ipairs(alts) do
 		altMenu:CreateButton(ClassColored(a), function() SetTo(a.name) end)
 	end
+	altMenu:CreateDivider()
+	-- Characters you haven't logged in on yet can be added by hand.
+	local typedAlt = Short(SendMailNameEditBox and SendMailNameEditBox:GetText())
+	if typedAlt then
+		altMenu:CreateButton("Add " .. typedAlt .. " as an alt", function()
+			if Book.AddAlt(typedAlt) then Print(typedAlt .. " was added to your alts.") end
+		end)
+	else
+		altMenu:CreateButton("|cff999999Type a name in To, then add it here|r", function() end)
+	end
 	if #alts > 0 then
-		altMenu:CreateDivider()
 		local forget = altMenu:CreateButton("Forget an alt")
 		for _, a in ipairs(alts) do
 			forget:CreateButton(a.name, function()
@@ -409,12 +457,15 @@ events:SetScript("OnEvent", function(_, event)
 		Lists()
 		ImportPostal()
 		RememberMe()
-		UpgradeFromSyndicator()
+		local added = ImportFromSyndicator()
+		if added > 0 then
+			Print(("Found %d of your characters in Syndicator and added them as alts."):format(added))
+		end
 		if SendMailFrame then
 			SendMailFrame:HookScript("OnShow", function()
 				CreateMenuButton()
 				RememberMe()
-				UpgradeFromSyndicator()
+				ImportFromSyndicator()
 			end)
 		end
 	elseif event == "PLAYER_LEVEL_UP" then

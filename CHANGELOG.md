@@ -1,5 +1,11 @@
 # Kjapp Utsendelse av Kolli
 
+## v3.2.0
+
+- **Alts without logging in on them:** if you use Baganator, every character Syndicator has recorded is added to your alts at login (full name, faction and class).
+- **Add an alt by hand:** type a name in To, then *Alts → Add <name> as an alt* in the address book.
+- *Forget an alt* now sticks, so the automatic import doesn't bring it back.
+
 ## v3.1.1
 
 - No more red **"You cannot attach more than 12 items to mail"** error (or its sound) when items go into the extra slots. Other errors still show.

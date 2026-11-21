@@ -9,7 +9,7 @@
 - **Resizable Send Mail window:** drag the bottom-right corner down for more rows of slots; the mouse wheel scrolls the slots when they don't all fit. Right-click the corner to go back to the normal size.
 - **Automatic subject:** an empty subject becomes the first item's name, like "Linen Cloth (20)". Right-click a few items, type a name, press Send. A subject you type yourself is never changed.
 - **QuickAttach buttons** down the right side: Cloth, Leather, Metal & Stone, Herb, Cooking, Elemental, Enchanting and more. Left-click attaches every matching item from your bags; right-click gives the button a default recipient. Each character picks a profile of which buttons show; Jewelcrafting, Inscription and Optional Reagents are hidden by default, since Forever doesn't have them.
-- **Address book:** the arrow beside the To field lists your alts (with level and class), recently mailed, contacts, friends and guild members.
+- **Address book:** the arrow beside the To field lists your alts (with level and class), recently mailed, contacts, friends and guild members. With Baganator installed, all the characters it knows are added as alts automatically; others can be added by hand.
 - **To field finds your alts first** while you type, then friends, guild, recently mailed and contacts. The order is yours to change, and it fills in the full character name ("First Surname"), never a realm.
 
 **Receiving**
