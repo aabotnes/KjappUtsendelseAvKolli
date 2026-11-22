@@ -1,5 +1,12 @@
 # Kjapp Utsendelse av Kolli
 
+## v3.2.1
+
+- **Open letters show only what they hold:** the gold first, then the items, in rows of 7. Only as many rows as needed (up to 3, then a scroll bar), and the letter window keeps its normal size.
+- The game's own gold button no longer shows up a second time in the middle.
+- **Fixed:** an error when hovering the gold in a letter, and in the gold summary when closing the mailbox.
+- *Copy text* is now a small note icon beside the letter's close button, clear of the sender's name.
+
 ## v3.2.0
 
 - **Alts without logging in on them:** if you use Baganator, every character Syndicator has recorded is added to your alts at login (full name, faction and class).

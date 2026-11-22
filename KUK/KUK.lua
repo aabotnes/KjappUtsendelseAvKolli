@@ -33,6 +33,19 @@ local function Print(msg)
 end
 PO.Print = Print
 
+-- Gold as text with coin icons. Forever keeps this under C_CurrencyInfo.
+function PO.MoneyText(amount)
+	amount = math.floor(tonumber(amount) or 0)
+	if C_CurrencyInfo and C_CurrencyInfo.GetCoinTextureString then
+		return C_CurrencyInfo.GetCoinTextureString(amount)
+	elseif type(GetCoinTextureString) == "function" then
+		return GetCoinTextureString(amount)
+	elseif type(GetMoneyString) == "function" then
+		return GetMoneyString(amount)
+	end
+	return ("%dg %ds %dc"):format(math.floor(amount / 10000), math.floor(amount / 100) % 100, amount % 100)
+end
+
 local function DB()
 	KUKDB = KUKDB or {}
 	return KUKDB

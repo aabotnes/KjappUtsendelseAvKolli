@@ -384,14 +384,25 @@ local function CreateLetterButtons()
 	end)
 	fwd:SetScript("OnLeave", GameTooltip_Hide)
 
-	local copy = CreateFrame("Button", "KUKCopyButton", OpenMailFrame, "UIPanelButtonTemplate")
-	copy:SetSize(80, 22)
-	if OpenMailReportSpamButton then
-		copy:SetPoint("RIGHT", OpenMailReportSpamButton, "LEFT", -4, 0)
+	local copy = CreateFrame("Button", "KUKCopyButton", OpenMailFrame)
+	copy:SetSize(18, 18)
+	local close = OpenMailFrame.CloseButton or _G.OpenMailFrameCloseButton
+	if close then
+		copy:SetPoint("RIGHT", close, "LEFT", -2, 0)
 	else
-		copy:SetPoint("TOPRIGHT", -12, -32)
+		copy:SetPoint("TOPRIGHT", -30, -3)
 	end
-	copy:SetText("Copy text")
+	copy:SetFrameLevel(OpenMailFrame:GetFrameLevel() + 10)
+	copy:SetNormalTexture("Interface\\Buttons\\UI-GuildButton-PublicNote-Up")
+	copy:SetPushedTexture("Interface\\Buttons\\UI-GuildButton-PublicNote-Down")
+	copy:SetHighlightTexture("Interface\\Buttons\\UI-Common-MouseHilight", "ADD")
+	copy:SetScript("OnEnter", function(self)
+		GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+		GameTooltip:SetText("Copy text", 1, 1, 1)
+		GameTooltip:AddLine("Shows the letter's text so you can copy it.", nil, nil, nil, true)
+		GameTooltip:Show()
+	end)
+	copy:SetScript("OnLeave", GameTooltip_Hide)
 	copy:SetScript("OnClick", ShowCopy)
 end
 
@@ -420,7 +431,7 @@ local function Closed()
 	if not mailOpen then return end
 	mailOpen = false
 	MoneyChanged()
-	if collected > 0 then Print("Collected " .. GetCoinTextureString(collected) .. " from the mailbox.") end
+	if collected > 0 then Print("Collected " .. PO.MoneyText(collected) .. " from the mailbox.") end
 	collected, lastMoney, queue = 0, nil, nil
 	wipe(selected)
 end

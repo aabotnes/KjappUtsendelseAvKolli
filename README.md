@@ -14,7 +14,7 @@
 
 **Receiving**
 
-- **Open letters use the same grid as Send Mail** (rows of 7, same slot limit and scroll bar).
+- **Open letters** show their gold first, then the items, in rows of 7; only as many rows as needed, with a scroll bar for big batches.
 - **One inbox row per batch:** letters from the same sender with the same subject and text show as one row. Opening it shows the gold and every item of all its letters in the letter's grid; *Take all* or shift-click the row takes everything.
 - **Tick boxes** on every row. With letters ticked, *Take ticked* and *Return ticked* take the place of Open All.
 - **Return and delete icons** on every row (delete only for letters with nothing left in them). **Ctrl-click** a row to send it back.

@@ -255,10 +255,11 @@ end
 ---------------------------------------------------------------------------
 -- The open letter's attachment grid
 ---------------------------------------------------------------------------
--- An open letter shows its gold and items in the same grid as the Send Mail
--- window: rows of 7 in reading order, as many rows as the Send Mail window shows
--- (more if you made it taller), the same slot limit and a scroll bar past that.
--- A grouped row shows the gold and items of all its letters in this one grid.
+-- An open letter shows its gold and items in rows of 7 in reading order, like
+-- the Send Mail grid: the gold first, then the items. Only filled slots show,
+-- and only as many rows as the items need, up to the game's 3 rows; past that
+-- the grid scrolls. The letter window keeps its normal size. A grouped row
+-- shows the gold and items of all its letters in this one grid.
 
 local function OpenGroup()
 	if depth > 0 then return end -- never regroup in the middle of drawing the list
@@ -288,7 +289,9 @@ end
 local cells, entries = {}, {}
 local letterTop = 0         -- first grid row in view
 local letterBaseHeight      -- the letter window's own height
+local letterActive = false  -- the grid has laid out the open letter
 local letterBar, takeAllButton, updatingBar
+local MAX_ROWS = ATTACHMENTS_MAX_ROWS_RECEIVE or 3
 local LayoutLetter
 
 local function BlizzardButtons()
@@ -305,16 +308,16 @@ local function Metrics()
 	local areax = OpenMailFrame:GetWidth() - 14 - 47
 	local gapx1 = math.floor((areax - iconx * PER_ROW) / (PER_ROW - 1))
 	local gapx2 = math.floor((areax - iconx * PER_ROW - gapx1 * (PER_ROW - 1)) / 2)
-	return { x = 14 + gapx2, tabx = iconx + gapx1 + 6, y = 31 + icony, taby = icony + 5, icony = icony }
+	return { x = 14 + gapx2, tabx = iconx + gapx1 + 6, y = 31 + icony, taby = icony + 3, icony = icony }
+end
+
+-- Rows the letter's gold and items need.
+local function TotalRows()
+	return math.ceil(#entries / PER_ROW)
 end
 
 local function VisibleRows()
-	return (KUK.GridVisibleRows and KUK.GridVisibleRows()) or 2
-end
-
-local function TotalRows()
-	local slots = math.max((KUK.GetMaxItems and KUK.GetMaxItems()) or 36, #entries)
-	return math.ceil(slots / PER_ROW)
+	return math.min(TotalRows(), MAX_ROWS)
 end
 
 local function MaxTop()
@@ -349,7 +352,8 @@ local function CellOnEnter(self)
 		end
 	elseif e.kind == "money" then
 		GameTooltip:SetText(MONEY or "Money", 1, 1, 1)
-		GameTooltip:AddLine(GetCoinTextureString(e.money), 1, 1, 1)
+		local ok, text = pcall(KUK.MoneyText, e.money)
+		GameTooltip:AddLine(ok and text or tostring(e.money), 1, 1, 1)
 	elseif e.kind == "letter" then
 		local onEnter = OpenMailLetterButton and OpenMailLetterButton:GetScript("OnEnter")
 		if onEnter then return onEnter(OpenMailLetterButton) end
@@ -440,15 +444,6 @@ local function CollectEntries()
 	local g = OpenGroup()
 	local members = g and g.members or { id }
 	local single = #members == 1
-	if single and OpenMailLetterButton then
-		-- A copy of the letter can be taken, as in the game, when it has text and
-		-- hasn't been copied yet.
-		local _, _, _, isTakeable = real.GetInboxText(id)
-		local _, stationery, _, _, _, _, _, _, _, _, textCreated = real.GetInboxHeaderInfo(id)
-		if isTakeable and not textCreated then
-			entries[#entries + 1] = { kind = "letter", icon = stationery or "Interface\\Icons\\INV_Misc_Note_01" }
-		end
-	end
 	local money = 0
 	for _, i in ipairs(members) do
 		local _, _, _, _, m = real.GetInboxHeaderInfo(i)
@@ -468,6 +463,15 @@ local function CollectEntries()
 					count = count, quality = quality, itemID = itemID, canUse = canUse,
 				}
 			end
+		end
+	end
+	if single and OpenMailLetterButton then
+		-- A copy of the letter can be taken, as in the game, when it has text and
+		-- hasn't been copied yet.
+		local _, _, _, isTakeable = real.GetInboxText(id)
+		local _, stationery, _, _, _, _, _, _, _, _, textCreated = real.GetInboxHeaderInfo(id)
+		if isTakeable and not textCreated then
+			entries[#entries + 1] = { kind = "letter", icon = stationery or "Interface\\Icons\\INV_Misc_Note_01" }
 		end
 	end
 	return g, members
@@ -521,16 +525,31 @@ function LayoutLetter()
 	if not (OpenMailFrame and OpenMailFrame:IsShown() and InboxFrame) then return end
 	if not letterBar then CreateLetterBar() end
 	if not letterBaseHeight then letterBaseHeight = OpenMailFrame:GetHeight() end
+	-- Earlier versions made this window taller; it keeps its own size now.
+	if math.abs(OpenMailFrame:GetHeight() - letterBaseHeight) > 0.5 then OpenMailFrame:SetHeight(letterBaseHeight) end
 	local g, members = CollectEntries()
-	local m = Metrics()
+	letterActive = true
+
+	-- The game's own buttons step aside for the grid.
+	for _, b in ipairs(BlizzardButtons()) do
+		if b then b:Hide() end
+	end
+
 	local rows = VisibleRows()
+	if rows == 0 then
+		-- Nothing in the letter: the game's own "No attachments" layout stays.
+		for _, b in ipairs(cells) do b:Hide() end
+		letterBar:Hide()
+		takeAllButton:Hide()
+		return
+	end
+	local m = Metrics()
 	letterTop = math.max(0, math.min(letterTop, MaxTop()))
 
-	-- The window grows like the Send Mail window; the letter text keeps its two-row size.
-	OpenMailFrame:SetHeight(letterBaseHeight + m.taby * (rows - 2))
+	-- The letter text gets what's left above the rows, like in the game.
 	local textH = OpenMailAttachmentText and OpenMailAttachmentText:GetHeight() or 12
-	local function AreaY(n) return 3 + textH + 3 + m.icony * n + 5 * (n - 1) + 3 end
-	local scrollHeight = math.min(256, 305 - AreaY(2))
+	local areay = 3 + textH + 3 + m.icony * rows + 3 * (rows - 1) + 3
+	local scrollHeight = math.min(256, 305 - areay)
 	OpenMailScrollFrame:SetHeight(scrollHeight)
 	if OpenMailScrollChildFrame then OpenMailScrollChildFrame:SetHeight(scrollHeight) end
 	for _, t in ipairs({ OpenStationeryBackgroundLeft, OpenStationeryBackgroundRight }) do
@@ -540,41 +559,31 @@ function LayoutLetter()
 		end
 	end
 	if OpenMailHorizontalBarLeft then
-		OpenMailHorizontalBarLeft:SetPoint("TOPLEFT", OpenMailFrame, "BOTTOMLEFT", 2, 39 + AreaY(rows))
-	end
-
-	-- The game's own buttons step aside for the grid.
-	for _, b in ipairs(BlizzardButtons()) do
-		if b then b:Hide() end
+		OpenMailHorizontalBarLeft:SetPoint("TOPLEFT", OpenMailFrame, "BOTTOMLEFT", 2, 39 + areay)
 	end
 
 	local topY = m.y + m.taby * (rows - 1)
 	if OpenMailAttachmentText then
 		local n = members and #members or 1
-		if #entries == 0 then
-			OpenMailAttachmentText:SetText(NO_ATTACHMENTS)
-			OpenMailAttachmentText:SetTextColor(GRAY_FONT_COLOR.r, GRAY_FONT_COLOR.g, GRAY_FONT_COLOR.b)
-		elseif n > 1 then
+		if n > 1 then
 			OpenMailAttachmentText:SetText(("%s  |cff33ff99%d letters|r"):format(TAKE_ATTACHMENTS, n))
-			OpenMailAttachmentText:SetTextColor(HIGHLIGHT_FONT_COLOR.r, HIGHLIGHT_FONT_COLOR.g, HIGHLIGHT_FONT_COLOR.b)
 		else
 			OpenMailAttachmentText:SetText(TAKE_ATTACHMENTS)
-			OpenMailAttachmentText:SetTextColor(HIGHLIGHT_FONT_COLOR.r, HIGHLIGHT_FONT_COLOR.g, HIGHLIGHT_FONT_COLOR.b)
 		end
+		OpenMailAttachmentText:SetTextColor(HIGHLIGHT_FONT_COLOR.r, HIGHLIGHT_FONT_COLOR.g, HIGHLIGHT_FONT_COLOR.b)
 		OpenMailAttachmentText:ClearAllPoints()
 		OpenMailAttachmentText:SetPoint("TOPLEFT", OpenMailFrame, "BOTTOMLEFT", m.x, topY + 3 + textH)
 	end
 	takeAllButton:ClearAllPoints()
-	takeAllButton:SetPoint("BOTTOMRIGHT", OpenMailFrame, "BOTTOMLEFT", m.x + m.tabx * (PER_ROW - 1) + m.icony - 2, topY + 3)
-	takeAllButton:SetShown(#entries > 1 or (g ~= nil and #entries > 0))
+	takeAllButton:SetPoint("BOTTOMRIGHT", OpenMailFrame, "BOTTOMLEFT", m.x + m.tabx * (PER_ROW - 1) + m.icony - 2, topY + 2)
+	takeAllButton:SetShown(#entries > 1 or g ~= nil)
 	takeAllButton:SetEnabled(not looting)
 
-	local total = TotalRows() * PER_ROW
-	for n = 1, math.max(total, #cells) do
-		local b = cells[n] or (n <= total and CreateCell(n))
+	for n = 1, math.max(#entries, #cells) do
+		local b = cells[n] or (n <= #entries and CreateCell(n))
 		if b then
 			local row, col = math.floor((n - 1) / PER_ROW), (n - 1) % PER_ROW
-			if n <= total and row >= letterTop and row < letterTop + rows then
+			if entries[n] and row >= letterTop and row < letterTop + rows then
 				local fromBottom = rows - 1 - (row - letterTop)
 				b:ClearAllPoints()
 				b:SetPoint("TOPLEFT", OpenMailFrame, "BOTTOMLEFT", m.x + m.tabx * col, m.y + m.taby * fromBottom)
@@ -605,14 +614,35 @@ function LayoutLetter()
 	end
 end
 
+-- Lay out again right after the game has finished its own layout for this frame.
+local pending = false
+local function LayoutSoon()
+	if pending then return end
+	pending = true
+	C_Timer.After(0, function()
+		pending = false
+		LayoutLetter()
+	end)
+end
+
 KUK.LetterGridRefresh = function()
 	if OpenMailFrame and OpenMailFrame:IsShown() then LayoutLetter() end
 end
 
 local function HookLetter()
 	OpenMailFrame:HookScript("OnShow", function() letterTop = 0 end)
+	OpenMailFrame:HookScript("OnHide", function() letterActive = false end)
+	-- If the game shows its own buttons again, they go back into hiding.
+	for _, b in ipairs(BlizzardButtons()) do
+		if b then
+			b:HookScript("OnShow", function(self)
+				if letterActive and OpenMailFrame:IsShown() then self:Hide() end
+			end)
+		end
+	end
 	hooksecurefunc(OpenMailFrame, "Update", function()
 		LayoutLetter()
+		LayoutSoon()
 		-- If the opened row was a group but its letters' texts turned out to
 		-- differ, the group has split: redraw the list so the rows match.
 		local id = InboxFrame and InboxFrame.openMailID
@@ -724,7 +754,7 @@ events:SetScript("OnEvent", function(_, event, ...)
 	elseif event == "MAIL_SHOW" or (event == "PLAYER_INTERACTION_MANAGER_FRAME_SHOW" and IsMailPane(...)) then
 		InstallHooks(true)
 	elseif event == "MAIL_INBOX_UPDATE" then
-		if OpenMailFrame and OpenMailFrame:IsShown() then LayoutLetter() end
+		if OpenMailFrame and OpenMailFrame:IsShown() then LayoutSoon() end
 	elseif event == "MAIL_CLOSED" or (event == "PLAYER_INTERACTION_MANAGER_FRAME_HIDE" and IsMailPane(...)) then
 		looting = nil
 	elseif event == "UI_ERROR_MESSAGE" then
